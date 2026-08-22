@@ -12,7 +12,7 @@ import type { Genome, GlassesStyle, HatStyle } from '../../core/genome'
 import type { Scene } from '../character'
 import { ellipsoidShade } from '../character'
 import type { Pencil } from '../pencil'
-import { type Pt, arc, quad, blob, withClip } from '../shapes'
+import { type Pt, arc, quad, blob, withClip, centroid } from '../shapes'
 import { drawHood } from './garment'
 
 /* ------------------------------------------------------------------- hats */
@@ -262,9 +262,25 @@ function drawGlasses(s: Scene): void {
     p.hatch(region, {
       color: hsl(200, 18, 76), alpha: 0.035, spacing: 3.4, angle: -0.7, layers: 1, gaps: 0.4, lane: 3100,
     })
-    p.contour(region, {
-      color: ink, alpha: 0.4, width: style === 'goggles' ? 2.8 : 2.1, passes: 2, wobble: 0.3, lane: 3104 + side,
+    // A fat, closed, near-black frame is the single loudest graphic in the
+    // reference. Two translucent passes produced a woolly grey double-line
+    // instead, so the frame is now laid as an opaque band: the lens outline
+    // offset outward and inward, filled as one ring.
+    const frameW = (style === 'goggles' ? 2.6 : 1.9) * (p.hand.construction > 0.5 ? 1 : 0.8)
+    const c0 = centroid(region)
+    const outer = region.map((q) => {
+      const dx = q.x - c0.x
+      const dy = q.y - c0.y
+      const len = Math.hypot(dx, dy) || 1
+      return { x: q.x + (dx / len) * frameW, y: q.y + (dy / len) * frameW }
     })
+    const inner = region.map((q) => {
+      const dx = q.x - c0.x
+      const dy = q.y - c0.y
+      const len = Math.hypot(dx, dy) || 1
+      return { x: q.x - (dx / len) * frameW, y: q.y - (dy / len) * frameW }
+    })
+    p.accentRing(outer, inner, ink, 0.86)
     // Highlight streak — a gap left in the tone plus one bright stroke.
     p.stroke([{ x: cx - r * 0.7, y: cy + r * 0.35 }, { x: cx - r * 0.1, y: cy - r * 0.55 }], {
       color: hsl(200, 20, 92), alpha: 0.2, width: 1.6, passes: 1, taper: 0.8, lane: 3108 + side,
@@ -286,6 +302,11 @@ function drawGlasses(s: Scene): void {
       [{ x: b.cx - f.eyeSpacing + r * 1.1, y: f.eyeY - r * 0.2 },
         { x: b.cx + f.eyeSpacing - r * 1.1, y: f.eyeY - r * 0.2 }],
       { color: ink, alpha: 0.34, width: style === 'goggles' ? 3 : 1.8, passes: 1, wobble: 0.3, lane: 3116 },
+    )
+    p.accentStroke(
+      [{ x: b.cx - f.eyeSpacing + r * 1.1, y: f.eyeY - r * 0.2 },
+        { x: b.cx + f.eyeSpacing - r * 1.1, y: f.eyeY - r * 0.2 }],
+      ink, style === 'goggles' ? 3.4 : 2.2, 0.8,
     )
     // Arms, disappearing behind the head.
     for (const side of [-1, 1] as const) {

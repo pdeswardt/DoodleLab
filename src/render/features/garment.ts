@@ -11,8 +11,7 @@ import { adjust, shade, tint, clamp, ground } from '../../core/color'
 import type { Genome, PatternStyle } from '../../core/genome'
 import { hasQuirk } from '../../core/quirks'
 import type { Scene } from '../character'
-import { ellipsoidShade, torsoSideEdges } from '../character'
-import { ART } from '../../core/genome'
+import { ellipsoidShade, torsoSideEdges, hemFor } from '../character'
 import type { Pencil } from '../pencil'
 import { type Pt, arc, quad, blob, withClip, bounds } from '../shapes'
 
@@ -139,11 +138,11 @@ function necklinePath(g: Genome, depth: number, width: number): Pt[] {
 }
 
 /** Bottom of the visible figure — collars and bibs must not run past it. */
-const hemY = ART.h - 46
 
 function drawCollar(s: Scene): void {
   const { p, g } = s
   const b = g.build
+  const hemY = hemFor(g) - 2
   const pal = g.palette
   const alt = pal.garmentAlt
   const ink = adjust(pal.ink, 4, -4)
@@ -364,7 +363,10 @@ function drawFastenings(s: Scene): void {
     })
   }
 
-  if (g.garment.pocket) {
+  // A pocket rectangle is a hard, closed, high-contrast shape — at low mark
+  // budget it out-reads the face, which is exactly the inversion the hierarchy
+  // term exists to prevent.
+  if (g.garment.pocket && p.density > 0.75) {
     const side = p.rng.sign()
     const x = b.cx + side * b.shoulderW * 0.52
     const y = b.shoulderY + 62
@@ -498,7 +500,8 @@ function drawCondition(s: Scene): void {
   }
 
   // 3. Individual stains, log-normal in size.
-  for (const [i, st] of c.stains.entries()) {
+  const stains = p.density > 0.75 ? c.stains : c.stains.slice(0, 1)
+  for (const [i, st] of stains.entries()) {
     const region = blob(st.x, st.y, st.r, st.r * 0.78, p.noise, {
       wobble: 0.28, lumps: 3.2, lane: 120 + i, steps: 18,
     })
@@ -517,7 +520,8 @@ function drawCondition(s: Scene): void {
   }
 
   // 4. Repairs. A patch is a rectangle of the wrong cloth with visible stitches.
-  for (let i = 0; i < Math.min(4, c.patches); i++) {
+  const patchBudget = p.density > 0.75 ? 4 : 1
+  for (let i = 0; i < Math.min(patchBudget, c.patches); i++) {
     const px = b.cx + rng.gauss(0, b.shoulderW * 0.55)
     const py = b.shoulderY + rng.range(24, 96)
     const w = rng.range(8, 15)

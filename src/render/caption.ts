@@ -68,10 +68,20 @@ export function drawCaption(
   })
 
   // 2. Cut the word out of it.
-  octx.globalCompositeOperation = 'destination-in'
-  octx.textAlign = 'center'
-  octx.textBaseline = 'middle'
-  octx.fillStyle = '#000'
+  // The glyphs are drawn onto their own buffer first and the whole word is
+  // then used as a single mask. Compositing each letter straight onto the
+  // hatching with `destination-in` is destructive: the first glyph erases
+  // everything that is not itself, and the second then intersects with what
+  // is left of that — which is nothing, so the caption vanished entirely.
+  const mask = document.createElement('canvas')
+  mask.width = off.width
+  mask.height = off.height
+  const mctx = mask.getContext('2d')!
+  mctx.scale(scale, scale)
+  mctx.font = `${size}px ${FONT_STACK}`
+  mctx.textAlign = 'center'
+  mctx.textBaseline = 'middle'
+  mctx.fillStyle = '#000'
 
   // Letter by letter, each nudged off the baseline and rotated a little.
   //
@@ -81,18 +91,23 @@ export function drawCaption(
   // marks. Placing the glyphs individually means the line reads as written by
   // hand whichever face actually resolves.
   const jitter = p.rng.fork('caption-letters')
-  const widths = [...word].map((ch) => octx.measureText(ch).width)
+  const widths = [...word].map((ch) => mctx.measureText(ch).width)
   const total = widths.reduce((a, b) => a + b, 0)
   let x = ART.w / 2 - total / 2
   for (const [i, ch] of [...word].entries()) {
     const cw = widths[i]!
-    octx.save()
-    octx.translate(x + cw / 2, boxH / 2 + 1 + jitter.gauss(0, size * 0.045))
-    octx.rotate(jitter.gauss(0, 0.035))
-    octx.fillText(ch, 0, 0)
-    octx.restore()
+    mctx.save()
+    mctx.translate(x + cw / 2, boxH / 2 + 1 + jitter.gauss(0, size * 0.045))
+    mctx.rotate(jitter.gauss(0, 0.035))
+    mctx.fillText(ch, 0, 0)
+    mctx.restore()
     x += cw * jitter.range(0.94, 1.04)
   }
+
+  octx.globalCompositeOperation = 'destination-in'
+  octx.setTransform(1, 0, 0, 1, 0, 0)
+  octx.drawImage(mask, 0, 0)
+  octx.setTransform(scale, 0, 0, scale, 0, 0)
 
   // 3. Drop the result onto the sheet.
   ctx.save()

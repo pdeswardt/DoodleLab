@@ -84,6 +84,7 @@ function expressBuild(dna: CharacterDNA): Build {
     tilt: b.tilt,
     turn: b.turn,
     frameScale: b.frameScale,
+    cropDepth: b.cropDepth,
     pressure: b.pressure,
     lineWobble: b.lineWobble,
     hatchAngle: b.hatchAngle,

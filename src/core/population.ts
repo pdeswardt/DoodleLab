@@ -134,9 +134,11 @@ export function generateSheet(o: SheetOptions): SheetResult {
   // family, head profile and drawing-style axes widened typical distances, so
   // the old value stopped catching anything; too high and it fires on nearly
   // every character, churning the sheet and skewing the quirk distribution.
-  // At this value roughly 4% of a 256-sheet trips it, which is about the rate
-  // at which two characters genuinely read as the same person.
-  const threshold = o.cloneThreshold ?? 0.92
+  // Recalibrated again after pose and framing joined the vector: those axes
+  // widened typical distances further, and the previous value had stopped
+  // firing entirely. Roughly 5% of a 256-sheet trips it here; at 1.5 it fires
+  // on half the sheet and churns it.
+  const threshold = o.cloneThreshold ?? 1.28
   // One key light for the whole sheet. Derived from the seed so it varies
   // between sheets and stays constant within one — a single artist does not
   // move the lamp between drawings.

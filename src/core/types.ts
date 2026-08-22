@@ -141,6 +141,8 @@ export interface Build {
   turn: number
   /** How large this figure is drawn within its frame. */
   frameScale: number
+  /** How low the bust is cut off by the frame. */
+  cropDepth: number
   /** Per-character drawing style — pressure, wrist looseness, hatch direction. */
   pressure: number
   lineWobble: number

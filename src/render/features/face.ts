@@ -610,7 +610,10 @@ function drawMouth(s: Scene): void {
     pts.map((q) => ({ x: q.x, y: q.y + (q.x - cx) * tilt }))
 
   const line = (pts: Pt[], alpha = 0.26, width = 1.7): void => {
-    p.stroke(tip(pts), { color: ink, alpha, width, passes: 2, wobble: 0.35, taper: 0.45, lane: 1200 })
+    // The line of the mouth is one of the few marks that should read as
+    // graphic rather than as pigment. Two translucent passes made it woolly.
+    if (built) p.accentStroke(tip(pts), ink, width * 1.05, Math.min(0.8, alpha * 2.4))
+    else p.stroke(tip(pts), { color: ink, alpha, width, passes: 2, wobble: 0.35, taper: 0.45, lane: 1200 })
   }
 
   switch (f.mouth) {
@@ -667,7 +670,10 @@ function drawMouth(s: Scene): void {
       line(quad({ x: cx - w * 0.9, y: cy - 1 }, { x: cx, y: cy + w * 0.5 }, { x: cx + w * 0.9, y: cy - 1 }, 14))
   }
 
-  if (built) {
+  // Lip volume needs room. Stacked into ten pixels on a sheet thumbnail it
+  // collapses into a smudge that reads as dirt on the paper, so below that it
+  // is left as the single confident curve the reference uses.
+  if (built && p.detail > 0.7) {
     // Lip volume: the upper lip turns away from the light and sits in shadow,
     // the lower lip catches it. Drawing the mouth as a single arc — which is
     // what it was — is the schematic a child uses.

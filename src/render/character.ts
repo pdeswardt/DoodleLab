@@ -150,8 +150,15 @@ export function headOutline(g: Genome, noise: Noise): Pt[] {
   return out
 }
 
-/** Where the figure is cropped by the frame. */
-const HEM = ART.h - 44
+/**
+ * Where the figure is cropped by the frame.
+ *
+ * Per character: every bust being sheared at the same line was one of the
+ * things a viewer read before any trait registered.
+ */
+export function hemFor(g: Genome): number {
+  return ART.h - 44 + (g.build.cropDepth - 1) * 70
+}
 
 /**
  * One shoulder, from the neck out to the tip and down to the crop.
@@ -185,7 +192,7 @@ function shoulderEdge(g: Genome, side: -1 | 1): Pt[] {
     ...quad(
       { x: b.cx + side * sw * 0.94, y: tipY },
       { x: b.cx + side * sw * (1.02 + b.shoulderRound * 0.1), y: tipY + 14 + b.shoulderRound * 22 },
-      { x: b.cx + side * sw * 1.02, y: HEM },
+      { x: b.cx + side * sw * 1.02, y: hemFor(g) },
       10,
     ).slice(1),
   ]
@@ -474,15 +481,9 @@ export function drawCharacter(
   const rng = new Rng(`${g.seed}::draw::${g.index}`)
   const noise = new Noise(rng.fork('noise'))
   const p = new Pencil(ctx, rng, noise, detail)
-  p.useStyle(o.style ?? STYLES.adult)
-  // The per-character knobs that make one artist's sheet look like a sheet
-  // rather than like one drawing repeated.
-  p.gain *= g.build.pressure
-  p.wobbleScale = g.build.lineWobble
-  p.angleBias = g.build.hatchAngle
-  p.finish = g.build.finish
-  p.nib = g.build.nib
-  p.gapScale = g.build.looseness
+  // Style and individual compose in one place, so neither can clobber the
+  // other: the sheet has one hand, and each character deviates from it.
+  p.useStyle(o.style ?? STYLES.adult, g.build)
 
   const head = headOutline(g, noise)
   const torso = torsoOutline(g)
@@ -540,7 +541,7 @@ export function drawCharacter(
   // Light touch. At 0.5 the tooth pulled even untouched paper down to ~233,
   // so the drawing had no whites anywhere — and a picture with no white and no
   // black lives in a mid-grey band and reads as a child's.
-  applyGrain(ctx, ART.w, ART.h, 0.28, g.index)
+  applyGrain(ctx, ART.w, ART.h, 0.12, g.index)
 }
 
 /** Convenience wrapper used by exports and the inspector. */

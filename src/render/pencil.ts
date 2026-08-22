@@ -182,14 +182,29 @@ export class Pencil {
    * level is applied here, in one place, rather than being consulted at each
    * call site.
    */
-  useStyle(st: StyleProfile): void {
+  useStyle(st: StyleProfile, hand?: {
+    pressure: number
+    lineWobble: number
+    hatchAngle: number
+    finish: number
+    nib: number
+    looseness: number
+  }): void {
     this.hand = st
-    this.wobbleScale *= st.wobble
-    this.gapScale *= st.gaps
-    this.nib = st.nib
+    // The style and the individual compose; they do not overwrite each other.
+    // Applying the profile and then assigning the per-character values on top
+    // silently discarded the style's wobble, gap and nib spread on every
+    // single draw — which is most of what separated the two ends of the axis.
+    const h = hand
+    this.wobbleScale = st.wobble * (h ? h.lineWobble : 1)
+    this.gapScale = st.gaps * (h ? h.looseness : 1)
+    // The character's nib is a deviation from the style's, not a replacement.
+    this.nib = st.nib * (h ? h.nib / 0.84 : 1)
+    this.angleBias = (h ? h.hatchAngle : 0) * st.angleSpread
+    this.finish = (h ? h.finish : 1)
     this.lineCoverage = st.construction < 0.5 ? 1 : 0.25 + (1 - st.construction) * 0.6
-    this.gain *= st.valueRange
-    this.pressure *= st.valueRange
+    this.gain *= st.valueRange * (h ? h.pressure : 1)
+    this.pressure *= st.valueRange * (h ? h.pressure : 1)
   }
 
   /** Memoised `hsla()` strings — colour churn is otherwise the top allocator. */
@@ -232,7 +247,7 @@ export class Pencil {
     const wobble = (o.wobble ?? 0.8) * this.wobbleScale
     const wobbleFreq = o.wobbleFreq ?? 2.4
     const gaps = clamp((o.gaps ?? 0.14) * this.gapScale, 0, 0.85)
-    const taper = o.taper ?? 0.45
+    const taper = clamp((o.taper ?? 0.45) * this.hand.taper, 0, 1)
     const lane = o.lane ?? 0
     const hueJitter = o.hueJitter ?? 2.5
 
@@ -535,6 +550,51 @@ export class Pencil {
     })
   }
 
+  /**
+   * A near-opaque ring: the area between an outer and an inner outline, filled
+   * with the even-odd rule. What a spectacle frame actually is.
+   */
+  accentRing(outer: readonly Pt[], inner: readonly Pt[], color: Hsl, alpha = 0.9): void {
+    const ctx = this.ctx
+    ctx.save()
+    ctx.globalCompositeOperation = 'source-over'
+    // Built as one Path2D with two subpaths: `tracePath` starts a fresh path
+    // each call, so tracing twice onto the context would discard the first.
+    const ring = new Path2D()
+    for (const loop of [outer, inner]) {
+      ring.moveTo(loop[0]!.x, loop[0]!.y)
+      for (let i = 1; i < loop.length; i++) ring.lineTo(loop[i]!.x, loop[i]!.y)
+      ring.closePath()
+    }
+    ctx.fillStyle = this.opaque(color, alpha)
+    ctx.fill(ring, 'evenodd')
+    ctx.restore()
+  }
+
+  /**
+   * A near-opaque line. The companion to `accent` for marks that are strokes
+   * rather than shapes — the line of a mouth, the arm of a pair of glasses.
+   */
+  accentStroke(pts: readonly Pt[], color: Hsl, width: number, alpha = 0.85): void {
+    const ctx = this.ctx
+    ctx.save()
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.strokeStyle = this.opaque(color, alpha)
+    ctx.lineWidth = width
+    const spine = resample(pts, 3)
+    ctx.beginPath()
+    ctx.moveTo(spine[0]!.x, spine[0]!.y)
+    for (let i = 1; i < spine.length; i++) {
+      const q = spine[i]!
+      const w = this.noise.at1(i * 0.5, 9) * 0.5 * this.wobbleScale
+      ctx.lineTo(q.x + w, q.y + w * 0.4)
+    }
+    ctx.stroke()
+    ctx.restore()
+  }
+
   /** Uncached colour lookup, for the rare opaque fills. */
   private opaque(c: Hsl, alpha: number): string {
     return css(c, clamp(alpha, 0, 1))
@@ -745,7 +805,11 @@ export function makePaper(w: number, h: number, tone: Hsl, seed: string): HTMLCa
   ctx.drawImage(small, 0, 0, c.width, c.height)
   ctx.restore()
 
-  applyGrain(ctx, c.width, c.height, 0.5)
+  // Light. The tooth is a texture on the paper, not a tint over it — at 0.5 it
+  // knocked the brightest achievable pixel down to ~236, and since every
+  // pigment layer multiplies, nothing in the picture could ever be whiter than
+  // that. The reference is nearly half bare paper.
+  applyGrain(ctx, c.width, c.height, 0.16)
 
   // A handful of fibres pressed into the pulp.
   ctx.save()

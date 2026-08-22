@@ -134,6 +134,8 @@ export interface BodyDNA {
   turn: number
   /** How large this figure is drawn within its frame. */
   frameScale: number
+  /** How low the bust is cut off by the frame. */
+  cropDepth: number
   /** How hard this one was pressed. */
   pressure: number
   /** How loose the wrist was. */
@@ -491,8 +493,14 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
     // A slight turn of the head is the cheapest large gain in variety: it moves
     // every feature at once without changing a single proportion.
     turn: clamp(rng.gauss(0, 0.34 * v), -0.85, 0.85),
-    // Not every figure is drawn at the same size on the page.
-    frameScale: clamp(rng.gauss(1, 0.055 * v), 0.85, 1.15),
+    // The camera. Previously every one of 256 cells framed its subject at the
+    // same distance, the same height and the same crop — which a viewer reads
+    // in the first fraction of a second, before hair or colour or age. Widened
+    // hard: some figures sit close and fill the cell, others sit back with air
+    // around them.
+    frameScale: clamp(rng.gauss(1, 0.13 * v), 0.7, 1.32),
+    /** How low the bust is cut off by the frame. */
+    cropDepth: clamp(rng.gauss(1, 0.1 * v), 0.78, 1.22),
     pressure: clamp(rng.gauss(1, 0.16), 0.7, 1.4),
     lineWobble: clamp(rng.gauss(1, 0.28), 0.5, 1.75),
     hatchAngle: rng.gauss(0, 0.62),
@@ -502,10 +510,10 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
     neck: clamp(0.5 + id.muscularity * 0.09 + id.mass * 0.07 + rng.gauss(0, 0.04 * v), 0.36, 0.72),
     shoulderSpan: shoulderSpan * shoulder.width,
     slope: clamp(shoulder.tipDrop + rng.gauss(0, 0.06) - id.posture * 0.05, 0.02, 0.6),
-    // Posture shows up as a small lean; slumped people tip slightly further.
-    tilt: rng.gauss(-id.posture * 0.01, 0.035 + c.variationStrength * 0.04),
-    cxJitter: rng.gauss(0, 2.6 + c.variationStrength * 3.4),
-    cyJitter: rng.gauss(0, 4.5),
+    // A real in-plane tilt, not the two degrees it was.
+    tilt: clamp(rng.gauss(-id.posture * 0.02, 0.055 + c.variationStrength * 0.06), -0.2, 0.2),
+    cxJitter: rng.gauss(0, 5 + c.variationStrength * 7),
+    cyJitter: rng.gauss(0, 6 + c.variationStrength * 8),
   }
 }
 
@@ -1137,6 +1145,10 @@ export function featureVector(dna: CharacterDNA): number[] {
     style * 2, hair.curl, hair.crown, hair.sides, body.nib, body.hatchAngle * 0.6,
     body.profile[2]! * 1.5, body.profile[5]! * 2, body.headNx * 0.5,
     face.featureScale * 1.5, face.eyeY * 4, face.mouthY * 3,
+    // Pose and framing: read before any trait, so the anti-clone pass has to
+    // be able to act on them.
+    body.frameScale * 2.5, body.cropDepth * 2, body.tilt * 6,
+    body.cxJitter * 0.08, body.cyJitter * 0.08,
     palette.skin[2] / 60, palette.hair[0] / 240, palette.hair[2] / 60,
     palette.garment[0] / 200, palette.garment[2] / 70,
     wardrobe.collar.length / 10, wardrobe.pattern.length / 10,
