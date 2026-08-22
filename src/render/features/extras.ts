@@ -7,7 +7,7 @@
  * detail you notice second or the first thing you see.
  */
 
-import { adjust, shade, tint, hsl, clamp, ground } from '../../core/color'
+import { adjust, shade, tint, hsl, clamp, ground, type Hsl } from '../../core/color'
 import type { Genome, GlassesSpec } from '../../core/genome'
 import { ART } from '../../core/types'
 import type { Scene } from '../character'
@@ -542,6 +542,21 @@ function pencilAt(p: Pencil, g: Genome, side: -1 | 1, k: number, lane: number): 
   })
 }
 
+/**
+ * Shift a prop's own colour per character.
+ *
+ * The props carried literal `hsl()` values, so every flower on a sheet had the
+ * same yellow centre and every snail the same shell. A quirk exists to make a
+ * character memorable; two identical ones undo that.
+ */
+function propCol(p: Pencil, h: number, sat: number, l: number): Hsl {
+  return hsl(
+    h + p.rng.gauss(0, 10),
+    clamp(sat + p.rng.gauss(0, 9), 8, 92),
+    clamp(l + p.rng.gauss(0, 7), 12, 92),
+  )
+}
+
 const QUIRK_DRAWERS: Record<string, QuirkDrawer> = {
   pencil: (s, k) => pencilAt(s.p, s.g, s.p.rng.sign() as -1 | 1, k, 3300),
   'two-pencils': (s, k) => {
@@ -552,87 +567,121 @@ const QUIRK_DRAWERS: Record<string, QuirkDrawer> = {
   flower: (s, k) => {
     const { p, g } = s
     const b = g.build
-    const side = p.rng.sign()
-    const x = b.cx + side * b.headRx * 0.94
-    const y = g.face.eyeY - b.headRy * 0.12
-    const r = 3.4 + k * 3
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2
-      const petal = arc(x + Math.cos(a) * r, y + Math.sin(a) * r, r * 0.62, r * 0.5, 0, Math.PI * 2, 10)
+    const rng = p.rng
+    const side = rng.sign()
+    const x = b.cx + side * b.headRx * rng.range(0.86, 1.02)
+    const y = g.face.eyeY - b.headRy * rng.range(0.02, 0.3)
+    const r = (3.4 + k * 3) * rng.range(0.8, 1.25)
+    // Petal count, shape and twist are the flower. Six identical round petals
+    // on every one of them was the same drawing at different sizes.
+    const petals = rng.int(4, 9)
+    const petalRx = r * rng.range(0.46, 0.8)
+    const petalRy = petalRx * rng.range(0.55, 1.15)
+    const twist = rng.range(0, Math.PI * 2)
+    const reach = r * rng.range(0.75, 1.2)
+    for (let i = 0; i < petals; i++) {
+      const a = twist + (i / petals) * Math.PI * 2
+      const petal = arc(x + Math.cos(a) * reach, y + Math.sin(a) * reach, petalRx, petalRy, 0, Math.PI * 2, 10)
       p.hatch(petal, { color: g.palette.accent, alpha: 0.13, spacing: 1.8, angle: a, layers: 1, lane: 3340 + i })
       p.contour(petal, { color: shade(g.palette.accent, 1.4), alpha: 0.12, width: 1, passes: 1, lane: 3346 + i })
     }
-    p.stroke(arc(x, y, r * 0.5, r * 0.5, 0, Math.PI * 2, 8), {
-      color: hsl(48, 70, 56), alpha: 0.3, width: 2, passes: 2, lane: 3352,
+    const eye = r * rng.range(0.34, 0.66)
+    p.stroke(arc(x, y, eye, eye, 0, Math.PI * 2, 8), {
+      color: propCol(p, 48, 70, 56), alpha: 0.3, width: 2, passes: 2, lane: 3352,
     })
   },
 
   leaf: (s, k) => {
     const { p, g } = s
     const b = g.build
-    const side = p.rng.sign()
-    const x = b.cx + side * b.headRx * 0.55
-    const y = b.cy - b.headRy * (0.85 + g.hair.crown * 0.3)
-    const len = 8 + k * 8
-    const a = -0.6 * side
-    const leaf: Pt[] = [
+    const rng = p.rng
+    const side = rng.sign()
+    const x = b.cx + side * b.headRx * rng.range(0.4, 0.72)
+    const y = b.cy - b.headRy * (0.85 + g.hair.crown * 0.3) * rng.range(0.94, 1.06)
+    const len = (8 + k * 8) * rng.range(0.75, 1.3)
+    const a = rng.range(-1.1, -0.2) * side
+    // How far out the widest point sits, and how broad it is, is the
+    // difference between a willow leaf and a lily pad.
+    const belly = rng.range(0.35, 0.72)
+    const wide = rng.range(0.3, 0.75)
+    const lp: Pt[] = [
       { x, y },
-      { x: x + Math.cos(a - 0.5) * len * 0.6, y: y + Math.sin(a - 0.5) * len * 0.6 },
+      { x: x + Math.cos(a - wide) * len * belly, y: y + Math.sin(a - wide) * len * belly },
       { x: x + Math.cos(a) * len, y: y + Math.sin(a) * len },
-      { x: x + Math.cos(a + 0.5) * len * 0.6, y: y + Math.sin(a + 0.5) * len * 0.6 },
+      { x: x + Math.cos(a + wide) * len * belly, y: y + Math.sin(a + wide) * len * belly },
     ]
-    p.hatch(leaf, { color: hsl(105, 40, 48), alpha: 0.15, spacing: 1.8, angle: a, layers: 2, lane: 3360 })
-    p.contour(leaf, { color: hsl(105, 40, 30), alpha: 0.16, width: 1.1, passes: 1, lane: 3364 })
+    const col = propCol(p, 105, 40, 48)
+    p.hatch(lp, { color: col, alpha: 0.15, spacing: 1.8, angle: a, layers: 2, lane: 3360 })
+    p.contour(lp, { color: shade(col, 1.6), alpha: 0.16, width: 1.1, passes: 1, lane: 3364 })
   },
 
   sprout: (s, k) => {
     const { p, g } = s
     const b = g.build
-    const x = b.cx + p.rng.gauss(0, 5)
+    const rng = p.rng
+    const x = b.cx + rng.gauss(0, 6)
     const y = b.cy - b.headRy * (1 + g.hair.crown * 0.5)
-    const h = 8 + k * 16
-    p.stroke(quad({ x, y }, { x: x + 2, y: y - h * 0.6 }, { x: x - 1, y: y - h }, 10), {
-      color: hsl(110, 42, 42), alpha: 0.26, width: 1.6, passes: 2, wobble: 0.4, lane: 3370,
+    const h = (8 + k * 16) * rng.range(0.7, 1.35)
+    const lean = rng.gauss(0, 4)
+    const stem = propCol(p, 110, 42, 42)
+    p.stroke(quad({ x, y }, { x: x + lean, y: y - h * 0.6 }, { x: x + lean * 0.4, y: y - h }, 10), {
+      color: stem, alpha: 0.26, width: 1.6, passes: 2, wobble: 0.4, lane: 3370,
     })
-    for (const side of [-1, 1] as const) {
-      const lx = x - 1 + side * 1
+    // One leaf or two, at their own size and droop — a fixed symmetric pair
+    // made every sprout the same sprout.
+    const pair = rng.bool(0.72)
+    const lw = rng.range(4.5, 9)
+    const droop = rng.range(-5, 3)
+    const col = propCol(p, 112, 44, 50)
+    for (const sd of (pair ? [-1, 1] : [rng.sign()]) as readonly (-1 | 1)[]) {
+      const lx = x + lean * 0.4 + sd
       const ly = y - h + 2
       const leaf = [
         { x: lx, y: ly },
-        { x: lx + side * 6, y: ly - 4 },
-        { x: lx + side * 9, y: ly + 1 },
-        { x: lx + side * 4, y: ly + 3 },
+        { x: lx + sd * lw * 0.66, y: ly - 4 + droop },
+        { x: lx + sd * lw, y: ly + 1 + droop },
+        { x: lx + sd * lw * 0.44, y: ly + 3 },
       ]
-      p.hatch(leaf, { color: hsl(112, 44, 50), alpha: 0.16, spacing: 1.6, angle: 0.4, layers: 1, lane: 3374 + side })
-      p.contour(leaf, { color: hsl(112, 44, 32), alpha: 0.15, width: 1, passes: 1, lane: 3378 + side })
+      p.hatch(leaf, { color: col, alpha: 0.16, spacing: 1.6, angle: 0.4, layers: 1, lane: 3374 + sd })
+      p.contour(leaf, { color: shade(col, 1.6), alpha: 0.15, width: 1, passes: 1, lane: 3378 + sd })
     }
   },
 
   snail: (s, k) => {
     const { p, g } = s
     const b = g.build
-    const side = p.rng.sign()
-    const x = b.cx + side * b.shoulderW * 0.72
-    const y = b.shoulderY + 16
-    const r = 5 + k * 4
-    // Shell: a spiral, drawn as one continuous mark.
+    const rng = p.rng
+    const side = rng.sign()
+    const x = b.cx + side * b.shoulderW * rng.range(0.62, 0.82)
+    const y = b.shoulderY + rng.range(8, 26)
+    const r = (5 + k * 4) * rng.range(0.8, 1.25)
+    // How many turns the shell has, and how fast it closes, is the snail.
+    const turns = rng.range(2.4, 5.4)
+    const close = rng.range(0.7, 0.93)
+    const tilt = rng.gauss(0, 0.5)
+    const shell = propCol(p, 32, 44, 44)
     const spiral: Pt[] = []
-    for (let i = 0; i <= 42; i++) {
-      const t = i / 42
-      const a = t * Math.PI * 4.2
-      const rr = r * (1 - t * 0.82)
+    const steps = Math.round(10 * turns)
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps
+      const a = tilt + t * Math.PI * turns
+      const rr = r * (1 - t * close)
       spiral.push({ x: x + Math.cos(a) * rr, y: y - r * 0.2 + Math.sin(a) * rr })
     }
-    p.stroke(spiral, { color: hsl(32, 44, 44), alpha: 0.24, width: 1.4, passes: 2, wobble: 0.3, lane: 3390 })
+    p.stroke(spiral, { color: shell, alpha: 0.24, width: 1.4, passes: 2, wobble: 0.3, lane: 3390 })
+    const foot = rng.range(1.2, 2.1)
     const bodyPts = [
-      { x: x - r * 1.5, y: y + r * 0.7 }, { x: x + r * 0.9, y: y + r * 0.6 },
-      { x: x + r * 0.6, y: y + r }, { x: x - r * 1.7, y: y + r * 1.05 },
+      { x: x - r * foot, y: y + r * 0.7 }, { x: x + r * 0.9, y: y + r * 0.6 },
+      { x: x + r * 0.6, y: y + r }, { x: x - r * (foot + 0.2), y: y + r * 1.05 },
     ]
-    p.hatch(bodyPts, { color: hsl(38, 26, 66), alpha: 0.14, spacing: 1.6, angle: 0.2, layers: 1, lane: 3394 })
-    p.contour(bodyPts, { color: hsl(30, 24, 40), alpha: 0.16, width: 1.1, passes: 1, lane: 3396 })
-    for (const dx of [-0.4, -0.9]) {
-      p.stroke([{ x: x - r * 1.5, y: y + r * 0.7 }, { x: x - r * (1.5 - dx), y: y - r * 0.4 }], {
-        color: hsl(30, 24, 40), alpha: 0.2, width: 1, passes: 1, taper: 0.5, lane: 3398,
+    const flesh = propCol(p, 38, 26, 66)
+    p.hatch(bodyPts, { color: flesh, alpha: 0.14, spacing: 1.6, angle: 0.2, layers: 1, lane: 3394 })
+    p.contour(bodyPts, { color: shade(flesh, 1.7), alpha: 0.16, width: 1.1, passes: 1, lane: 3396 })
+    const horn = rng.range(0.3, 1)
+    const spread = rng.range(0.2, 0.9)
+    for (const dx of [-spread * 0.5, -spread]) {
+      p.stroke([{ x: x - r * foot, y: y + r * 0.7 }, { x: x - r * (foot - dx), y: y - r * horn }], {
+        color: shade(flesh, 1.7), alpha: 0.2, width: 1, passes: 1, taper: 0.5, lane: 3398,
       })
     }
   },
@@ -640,68 +689,97 @@ const QUIRK_DRAWERS: Record<string, QuirkDrawer> = {
   bird: (s, k) => {
     const { p, g } = s
     const b = g.build
-    const side = p.rng.sign()
-    const x = b.cx + side * b.shoulderW * 0.74
-    const y = b.shoulderY + 6
-    const r = 5 + k * 4
-    const bodyPts = blob(x, y - r, r * 1.1, r * 1.25, p.noise, { wobble: 0.1, lumps: 2, lane: 141, steps: 18 })
+    const rng = p.rng
+    const side = rng.sign()
+    const x = b.cx + side * b.shoulderW * rng.range(0.64, 0.84)
+    const y = b.shoulderY + rng.range(0, 14)
+    const r = (5 + k * 4) * rng.range(0.8, 1.3)
+    // Body aspect, neck length and head size separate a wren from a pigeon.
+    const plump = rng.range(0.85, 1.4)
+    const neck = rng.range(1.7, 2.5)
+    const headR = r * rng.range(0.5, 0.78)
+    const bodyPts = blob(x, y - r, r * 1.1 * plump, r * 1.25 / plump ** 0.5, p.noise, {
+      wobble: 0.1, lumps: 2, lane: 141, steps: 18,
+    })
     p.hatch(bodyPts, { color: g.palette.accent, alpha: 0.15, spacing: 1.7, angle: 0.9, layers: 2, lane: 3400 })
     p.contour(bodyPts, { color: shade(g.palette.accent, 1.6), alpha: 0.16, width: 1.1, passes: 1, lane: 3404 })
-    const head = arc(x - side * r * 0.5, y - r * 2.1, r * 0.62, r * 0.62, 0, Math.PI * 2, 12)
+    const hx = x - side * r * rng.range(0.3, 0.75)
+    const hy = y - r * neck
+    const head = arc(hx, hy, headR, headR, 0, Math.PI * 2, 12)
     p.hatch(head, { color: g.palette.accent, alpha: 0.15, spacing: 1.5, angle: 0.5, layers: 1, lane: 3406 })
     p.contour(head, { color: shade(g.palette.accent, 1.6), alpha: 0.15, width: 1, passes: 1, lane: 3408 })
-    p.stroke([{ x: x - side * r * 1.1, y: y - r * 2.1 }, { x: x - side * r * 1.7, y: y - r * 1.95 }], {
-      color: hsl(38, 68, 52), alpha: 0.3, width: 1.6, passes: 1, taper: 0.4, lane: 3410,
+    const beak = r * rng.range(0.4, 1)
+    p.stroke([{ x: hx - side * headR, y: hy }, { x: hx - side * (headR + beak), y: hy + rng.gauss(0, 1.2) }], {
+      color: propCol(p, 38, 68, 52), alpha: 0.3, width: 1.6, passes: 1, taper: 0.4, lane: 3410,
     })
   },
 
   moth: (s, k) => {
     const { p, g } = s
     const b = g.build
-    const x = b.cx + p.rng.gauss(0, 1) + p.rng.sign() * b.headRx * 1.25
-    const y = b.cy - b.headRy * p.rng.range(0.3, 0.9)
-    const r = 4 + k * 3.5
+    const rng = p.rng
+    const x = b.cx + rng.gauss(0, 1) + rng.sign() * b.headRx * rng.range(1.1, 1.45)
+    const y = b.cy - b.headRy * rng.range(0.3, 0.9)
+    const r = (4 + k * 3.5) * rng.range(0.8, 1.3)
+    const span = rng.range(0.5, 1.1)
+    const wingRy = r * rng.range(0.5, 0.95)
+    const swept = rng.range(0.1, 0.8)
+    const col = propCol(p, 38, 18, 64)
     for (const side of [-1, 1] as const) {
-      const wing = blob(x + side * r * 0.8, y, r, r * 0.72, p.noise, {
+      const wing = blob(x + side * r * span, y, r, wingRy, p.noise, {
         wobble: 0.14, lumps: 2, lane: 142 + side, steps: 16,
       })
-      p.hatch(wing, { color: hsl(38, 18, 64), alpha: 0.12, spacing: 1.6, angle: 0.4 * side, layers: 1, lane: 3420 + side })
-      p.contour(wing, { color: hsl(32, 20, 40), alpha: 0.14, width: 1, passes: 1, lane: 3424 + side })
+      p.hatch(wing, { color: col, alpha: 0.12, spacing: 1.6, angle: swept * side, layers: 1, lane: 3420 + side })
+      p.contour(wing, { color: shade(col, 1.8), alpha: 0.14, width: 1, passes: 1, lane: 3424 + side })
     }
-    p.stroke([{ x, y: y - r * 0.5 }, { x, y: y + r * 0.6 }], {
-      color: hsl(30, 22, 34), alpha: 0.24, width: 1.6, passes: 1, lane: 3428,
+    p.stroke([{ x, y: y - r * 0.5 }, { x, y: y + r * rng.range(0.4, 1.1) }], {
+      color: shade(col, 2), alpha: 0.24, width: 1.6, passes: 1, lane: 3428,
     })
   },
 
   bubble: (s, k) => {
     const { p, g } = s
     const b = g.build
-    const x = b.cx + p.rng.sign() * b.headRx * p.rng.range(1.05, 1.5)
-    const y = b.cy - b.headRy * p.rng.range(0.2, 0.8)
-    const r = 5 + k * 7
-    p.stroke(arc(x, y, r, r, 0, Math.PI * 2, 24), {
-      color: hsl(195, 34, 68), alpha: 0.2, width: 1.2, passes: 2, wobble: 0.3, gaps: 0.3, lane: 3440,
-    })
-    p.stroke(arc(x, y, r * 0.62, r * 0.62, Math.PI * 1.1, Math.PI * 1.5, 8), {
-      color: hsl(195, 30, 88), alpha: 0.3, width: 1.6, passes: 1, taper: 0.8, lane: 3444,
-    })
+    const rng = p.rng
+    const n = rng.int(1, 3)
+    const col = propCol(p, 195, 34, 68)
+    for (let i = 0; i < n; i++) {
+      const x = b.cx + rng.sign() * b.headRx * rng.range(1.02, 1.55)
+      const y = b.cy - b.headRy * rng.range(0.1, 0.9)
+      const r = (5 + k * 7) * rng.range(0.5, 1.2) * (i === 0 ? 1 : 0.6)
+      p.stroke(arc(x, y, r, r * rng.range(0.85, 1.15), 0, Math.PI * 2, 24), {
+        color: col, alpha: 0.2, width: 1.2, passes: 2, wobble: 0.3, gaps: 0.3, lane: 3440 + i * 3,
+      })
+      const ha = rng.range(0.9, 1.6) * Math.PI
+      p.stroke(arc(x, y, r * 0.62, r * 0.62, ha, ha + rng.range(0.3, 0.7), 8), {
+        color: tint(col, 1.5), alpha: 0.3, width: 1.6, passes: 1, taper: 0.8, lane: 3444 + i * 3,
+      })
+    }
   },
 
   steam: (s, k) => {
     const { p, g } = s
     const b = g.build
-    const side = p.rng.sign()
-    const x = b.cx + side * b.shoulderW * 0.85
-    const y = b.shoulderY + 46
-    const h = 30 + k * 30
-    for (let i = 0; i < 3; i++) {
+    const rng = p.rng
+    const side = rng.sign()
+    const x = b.cx + side * b.shoulderW * rng.range(0.75, 0.95)
+    const y = b.shoulderY + rng.range(36, 58)
+    const h = (30 + k * 30) * rng.range(0.7, 1.3)
+    // Wisp count, how tightly each curls and how far it drifts sideways —
+    // three identical sine waves read as a graph, not as steam.
+    const wisps = rng.int(2, 5)
+    const freq = rng.range(3, 7)
+    const drift = rng.range(2, 9)
+    const col = propCol(p, 200, 12, 74)
+    for (let i = 0; i < wisps; i++) {
+      const phase = rng.range(0, Math.PI * 2)
       const pts: Pt[] = []
       for (let j = 0; j <= 10; j++) {
         const t = j / 10
-        pts.push({ x: x + Math.sin(t * 5 + i * 1.7) * (4 + t * 6), y: y - t * h })
+        pts.push({ x: x + Math.sin(t * freq + phase) * (4 + t * drift), y: y - t * h * rng.range(0.98, 1.02) })
       }
       p.stroke(pts, {
-        color: hsl(200, 12, 74), alpha: 0.11, width: 2.4, passes: 1,
+        color: col, alpha: 0.11, width: rng.range(1.8, 3.2), passes: 1,
         wobble: 1, gaps: 0.34, taper: 0.9, lane: 3460 + i,
       })
     }
@@ -710,19 +788,26 @@ const QUIRK_DRAWERS: Record<string, QuirkDrawer> = {
   star: (s, k) => {
     const { p, g } = s
     const b = g.build
+    const rng = p.rng
     const count = 1 + Math.round(k * 2)
+    // Arm count and length asymmetry, rolled once so the cluster is one hand's
+    // stars rather than a stamp repeated.
+    const arms = rng.int(4, 8)
+    const twist = rng.range(0, Math.PI)
+    const asym = rng.range(0, 0.45)
     for (let i = 0; i < count; i++) {
-      const a = -Math.PI * p.rng.range(0.2, 0.9)
-      const d = b.headRx * p.rng.range(1.15, 1.5)
+      const a = -Math.PI * rng.range(0.2, 0.9)
+      const d = b.headRx * rng.range(1.15, 1.5)
       const x = b.cx + Math.cos(a) * d
       const y = b.cy + Math.sin(a) * d
-      const r = 3.5 + k * 3
-      for (let arm = 0; arm < 4; arm++) {
-        const aa = (arm / 4) * Math.PI * 2
+      const r = (3.5 + k * 3) * rng.range(0.7, 1.3)
+      for (let arm = 0; arm < arms; arm++) {
+        const aa = twist + (arm / arms) * Math.PI * 2
+        const len = r * (1 - asym * (arm % 2))
         p.stroke(
-          [{ x: x - Math.cos(aa) * r, y: y - Math.sin(aa) * r },
-            { x: x + Math.cos(aa) * r, y: y + Math.sin(aa) * r }],
-          { color: g.palette.accent, alpha: 0.26, width: 1.4, passes: 1, taper: 0.9, lane: 3480 + i * 4 + arm },
+          [{ x: x - Math.cos(aa) * len, y: y - Math.sin(aa) * len },
+            { x: x + Math.cos(aa) * len, y: y + Math.sin(aa) * len }],
+          { color: g.palette.accent, alpha: 0.26, width: 1.4, passes: 1, taper: 0.9, lane: 3480 + i * 8 + arm },
         )
       }
     }
@@ -731,10 +816,17 @@ const QUIRK_DRAWERS: Record<string, QuirkDrawer> = {
   halo: (s, k) => {
     const { p, g } = s
     const b = g.build
-    const y = b.cy - b.headRy * (1.2 + g.hair.crown * 0.5)
-    const ring = arc(b.cx + k * 6, y, b.headRx * 0.62, b.headRx * 0.2, 0, Math.PI * 2, 26)
+    const rng = p.rng
+    const y = b.cy - b.headRy * (1.2 + g.hair.crown * 0.5) * rng.range(0.92, 1.12)
+    // How far it is tipped toward the viewer is the whole read of a halo.
+    const ring = arc(
+      b.cx + k * 6 + rng.gauss(0, 4), y,
+      b.headRx * rng.range(0.48, 0.78), b.headRx * rng.range(0.08, 0.3),
+      0, Math.PI * 2, 26,
+    )
     p.stroke(ring, {
-      color: hsl(48, 68, 58), alpha: 0.24, width: 2.2, passes: 2, wobble: 0.4, gaps: 0.2, lane: 3500,
+      color: propCol(p, 48, 68, 58), alpha: 0.24, width: rng.range(1.6, 3),
+      passes: 2, wobble: 0.4, gaps: 0.2, lane: 3500,
     })
   },
 
