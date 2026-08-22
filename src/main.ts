@@ -21,7 +21,7 @@ import type { Genome } from './core/types'
 import { ART } from './core/types'
 import { drawCharacter } from './render/character'
 import { makePaper } from './render/pencil'
-import { styleAt, type StyleProfile } from './core/style'
+import { resolveStyle, styleAt, type StyleProfile } from './core/style'
 import { SheetView } from './ui/sheet'
 import { exportCharacter, exportSheet } from './ui/exporter'
 
@@ -30,7 +30,7 @@ import { exportCharacter, exportSheet } from './ui/exporter'
 interface State {
   seed: string
   /** 0 = a child's hand, 1 = a trained illustrator's. */
-  style: number
+  style: string
   hand: StyleProfile
   cols: number
   detail: number
@@ -44,7 +44,7 @@ interface State {
 
 const state: State = {
   seed: randomSeed(),
-  style: 0.85,
+  style: '0.85',
   hand: styleAt(0.85),
   cols: 16,
   detail: 0.58,
@@ -305,8 +305,8 @@ function bindBar(): void {
   })
 
   styleSelect.addEventListener('change', () => {
-    state.style = Number(styleSelect.value)
-    state.hand = styleAt(state.style)
+    state.style = styleSelect.value
+    state.hand = resolveStyle(state.style)
     draw()
   })
 

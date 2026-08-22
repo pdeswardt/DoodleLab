@@ -322,7 +322,7 @@ export class Pencil {
     const baseSpacing = (o.spacing ?? 2.6) * 0.6 / (d * this.density)
     const baseAngle = (o.angle ?? -0.62) + this.angleBias
     const layerTurn = ((o.layerTurn ?? 26) * Math.PI) / 180
-    const alpha = o.alpha ?? 0.085
+    const alpha = (o.alpha ?? 0.085) * (1 - this.hand.ink * 0.45)
     // A hatch line should be about as wide as the gap to its neighbour. Any
     // narrower and the fill reads as a set of lines; any wider and the grain
     // between them is lost. This single relationship is most of the difference
@@ -481,8 +481,29 @@ export class Pencil {
       taper: 0.12,
       step: 2.4,
       ...o,
+      // Pulled toward ink last, after the caller's own options, so a hand that
+      // draws in pen converts every contour in the picture at once rather than
+      // needing each call site to know about it.
+      color: this.inkify(o.color),
       alphaAt,
     })
+  }
+
+  /**
+   * Pull a colour toward pen-black by however much this hand is a pen.
+   *
+   * Coloured pencil outlines in a cousin of the local colour, which is what
+   * keeps a drawing from going muddy. A pen has one colour and the line is the
+   * whole drawing, so at the ink end of the axis every contour converges on it.
+   */
+  inkify(c: Hsl): Hsl {
+    const k = this.hand.ink
+    if (k <= 0.01) return c
+    return {
+      h: c.h,
+      s: c.s + (16 - c.s) * k,
+      l: c.l + (14 - c.l) * k,
+    }
   }
 
   /**
@@ -641,6 +662,9 @@ export class Pencil {
    */
   base(region: readonly Pt[], ground: Hsl, alpha = 0.97, smooth = true): void {
     const ctx = this.ctx
+    // A pen drawing is not a filled drawing: the colour is a thin note behind
+    // the line, not the substance of the form.
+    alpha *= 1 - this.hand.ink * 0.7
     ctx.save()
     ctx.globalCompositeOperation = 'source-over'
     tracePath(ctx, region, true, smooth)

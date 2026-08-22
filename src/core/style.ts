@@ -13,7 +13,7 @@
  * paper; they differ in everything else.
  */
 
-export type DrawStyle = 'child' | 'adult'
+export type DrawStyle = 'child' | 'adult' | 'doodle'
 
 export interface StyleProfile {
   id: DrawStyle
@@ -63,6 +63,29 @@ export interface StyleProfile {
 
   /** Multiplier on chroma. Untrained colour runs hot and unmixed. */
   saturation: number
+
+  /* ------------------------------------------------------ the composition */
+
+  /**
+   * What is on the page. 'bust' is head, neck and shoulders cropped by the
+   * frame; 'head' is a head alone, floating, with nothing under it.
+   */
+  composition: 'bust' | 'head'
+  /**
+   * How much the drawing is a pen line rather than pigment.
+   *
+   * At 0 the contour is a soft cousin of the local colour and the form is
+   * carried by hatching. At 1 the contour is a dark ink line carrying the whole
+   * drawing, and colour is a thin flat note behind it — which is a different
+   * medium, not a harder pencil.
+   */
+  ink: number
+  /**
+   * The background. 'panel' is the large rounded square the figure sits on;
+   * 'patch' is a small shape behind the head — a circle, a square, a scribble,
+   * or nothing at all.
+   */
+  backdrop: 'panel' | 'patch'
 }
 
 export const STYLES: Record<DrawStyle, StyleProfile> = {
@@ -83,6 +106,11 @@ export const STYLES: Record<DrawStyle, StyleProfile> = {
     construction: 0.1,
     exaggeration: 1.25,
     saturation: 1.3,
+    composition: 'bust',
+    // Both ends of this axis are coloured pencil. A bold child's outline is
+    // still pigment, not pen, so neither end sits anywhere but zero here.
+    ink: 0,
+    backdrop: 'panel',
   },
   adult: {
     id: 'adult',
@@ -101,6 +129,41 @@ export const STYLES: Record<DrawStyle, StyleProfile> = {
     construction: 1,
     exaggeration: 0.75,
     saturation: 0.85,
+    composition: 'bust',
+    ink: 0,
+    backdrop: 'panel',
+  },
+
+  /**
+   * A third hand entirely, and the reason it is a separate entry rather than a
+   * point on the slider: it is not a child or an adult drawing the same
+   * picture, it is a different picture. A head alone with nothing under it,
+   * built from one wandering ink line, on a small patch of colour — the line
+   * carries everything and the colour is an afterthought behind it.
+   */
+  doodle: {
+    id: 'doodle',
+    name: 'Doodle',
+    blurb: 'one wobbling ink line, a head alone on a patch of colour',
+    wobble: 2.1,
+    gaps: 0.55,
+    nib: 0.72,
+    contourAlpha: 3.6,
+    contourWidth: 0.9,
+    taper: 0.35,
+    angleSpread: 1.6,
+    // Almost no modelling: the line does the work, not the tone.
+    modelling: 0.12,
+    valueRange: 0.55,
+    hierarchy: 0.15,
+    // Features are constructed rather than symbolic — a doodle's eye is a
+    // specific wrong shape, not a circle.
+    construction: 0.62,
+    exaggeration: 2.4,
+    saturation: 0.7,
+    composition: 'head',
+    ink: 1,
+    backdrop: 'patch',
   },
 }
 
@@ -134,10 +197,26 @@ export function mixStyles(a: StyleProfile, b: StyleProfile, t: number): StylePro
     construction: l(a.construction, b.construction),
     exaggeration: l(a.exaggeration, b.exaggeration),
     saturation: l(a.saturation, b.saturation),
+    composition: t < 0.5 ? a.composition : b.composition,
+    ink: l(a.ink, b.ink),
+    backdrop: t < 0.5 ? a.backdrop : b.backdrop,
   }
 }
 
 /** Resolve a 0..1 slider into a concrete profile. */
 export function styleAt(t: number): StyleProfile {
   return mixStyles(STYLES.child, STYLES.adult, Math.min(1, Math.max(0, t)))
+}
+
+/**
+ * Resolve a control value into a profile.
+ *
+ * The child-to-illustrator axis is a slider between two ends of one medium, so
+ * it takes a number. A hand that draws a different picture entirely cannot sit
+ * on that slider, so it is named instead.
+ */
+export function resolveStyle(value: string): StyleProfile {
+  const named = STYLES[value as DrawStyle]
+  if (named) return named
+  return styleAt(Number(value))
 }

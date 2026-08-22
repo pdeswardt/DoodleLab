@@ -14,7 +14,7 @@ import { ART, type Genome } from '../core/genome'
 import { Pencil, applyGrain, makePaper } from './pencil'
 import { LayerStack } from './layers'
 import { STYLES, type StyleProfile } from '../core/style'
-import { quad, arc, tracePath, centroid, type Pt } from './shapes'
+import { quad, arc, blob, tracePath, centroid, type Pt } from './shapes'
 import { drawHairBack, drawHairFront } from './features/hair'
 import { drawFace, drawEars } from './features/face'
 import { drawGarment } from './features/garment'
@@ -132,9 +132,12 @@ export function sampleProfile(ctrl: readonly number[], h: number): number {
  * are independent — which is what lets a heart-shaped face, a jowly one and a
  * long narrow one be genuinely different shapes instead of the same egg.
  */
-export function headOutline(g: Genome, noise: Noise): Pt[] {
+export function headOutline(g: Genome, noise: Noise, push = 1): Pt[] {
   const b = g.build
   const steps = b.facet ? 26 : 46
+  // How far the hand pushes a skull past its anatomical proportions. A trained
+  // hand barely does; a doodle is mostly this, and it is the difference
+  // between ten head families and ten variations on an oval.
   const invY = 2 / b.headN
   const invX = 2 / b.headNx
   const out: Pt[] = []
@@ -147,10 +150,10 @@ export function headOutline(g: Genome, noise: Noise): Pt[] {
     // Height first: +1 is the chin, -1 the crown.
     const hy = Math.sign(st) * Math.abs(st) ** invY
     // Then the half-width the profile allows at that height.
-    const w = sampleProfile(b.profile, hy)
+    const w = 1 + (sampleProfile(b.profile, hy) - 1) * push
     const wx = Math.sign(ct) * Math.abs(ct) ** invX
     // Lopsidedness, and a little wobble so no outline is machine-perfect.
-    const lean = 1 + b.headAsym * ct
+    const lean = 1 + b.headAsym * ct * push
     const wob = 1 + noise.at(Math.cos(t) * 2.2 + 13, Math.sin(t) * 2.2 + 7) * 0.028
 
     // The turn deforms the skull itself. Previously it only shifted the
@@ -283,6 +286,78 @@ function neckOutline(g: Genome): Pt[] {
  * through. It is drawn with very wide, very faint side-of-pencil marks and then
  * deliberately broken up at the edges so it never looks like a filled shape.
  */
+/**
+ * The backdrop, when the hand draws a head alone.
+ *
+ * Not the panel: a small shape behind the head, roughly the size of the head
+ * itself — a filled circle, a soft blob, a hard-edged rectangle, a ring drawn
+ * as an outline, a scribbled halo, or nothing at all. Which of those, and how
+ * far it sits off centre, is the strongest thing separating one of these
+ * drawings from the next, because there is so little else on the page.
+ */
+function drawPatch(s: Scene): void {
+  const { p, g } = s
+  const b = g.build
+  const pal = g.palette
+  const rng = p.rng.fork('patch')
+  const kind = rng.weighted<'none' | 'disc' | 'blob' | 'rect' | 'ring' | 'scribble'>([
+    ['none', 1.6], ['disc', 2.6], ['blob', 2], ['rect', 1.2], ['ring', 1], ['scribble', 1.6],
+  ])
+  if (kind === 'none') return
+
+  const cx = b.cx + rng.gauss(0, b.headRx * 0.18)
+  const cy = b.cy + rng.gauss(0, b.headRy * 0.14)
+  const rx = b.headRx * rng.range(1.02, 1.5)
+  const ry = b.headRy * rng.range(0.95, 1.45)
+  const col = rng.bool(0.5) ? pal.wash : rng.bool(0.5) ? pal.washAlt : pal.garment
+  const tone = hsl(col.h + rng.gauss(0, 10), clamp(col.s * rng.range(0.5, 1.1), 6, 46), clamp(col.l, 58, 88))
+
+  if (kind === 'ring') {
+    // Just the outline, drawn round once by hand.
+    p.stroke(arc(cx, cy, rx, ry, 0, Math.PI * 2.04, 40), {
+      color: tone, alpha: 0.4, width: rng.range(1.6, 3.4),
+      passes: 1, wobble: 1.6, gaps: 0.1, lane: 720,
+    })
+    return
+  }
+
+  if (kind === 'scribble') {
+    // A halo of short radiating marks, denser at the edge — the way a pen
+    // fills a circle when it is not trying to be a fill.
+    const n = rng.int(60, 150)
+    for (let i = 0; i < n; i++) {
+      const a = rng.next() * Math.PI * 2
+      const t = 0.62 + rng.next() * 0.5
+      const len = rng.range(3, 12)
+      const dx = Math.cos(a)
+      const dy = Math.sin(a)
+      p.stroke([
+        { x: cx + dx * rx * t, y: cy + dy * ry * t },
+        { x: cx + dx * (rx * t + len), y: cy + dy * (ry * t + len) },
+      ], { color: tone, alpha: 0.16, width: rng.range(0.9, 2), passes: 1, wobble: 1.2, taper: 0.7, lane: 730 + i })
+    }
+    return
+  }
+
+  const region = kind === 'rect'
+    ? [
+      { x: cx - rx, y: cy - ry }, { x: cx + rx, y: cy - ry },
+      { x: cx + rx, y: cy + ry }, { x: cx - rx, y: cy + ry },
+    ]
+    : blob(cx, cy, rx, ry, p.noise, {
+      n: kind === 'disc' ? 2 : rng.range(1.7, 2.6),
+      wobble: kind === 'disc' ? 0.035 : rng.range(0.08, 0.22),
+      lumps: rng.range(1.8, 4),
+      lane: 44,
+      steps: 44,
+    })
+  p.base(region, ground(tone), rng.range(0.5, 0.86), kind !== 'rect')
+  p.hatch(region, {
+    color: tone, alpha: 0.07, spacing: rng.range(2.2, 4),
+    angle: rng.range(-Math.PI, Math.PI), layers: 1, gaps: 0.3, lane: 760,
+  })
+}
+
 function drawWash(s: Scene): void {
   const { p, g } = s
   const w = g.wash
@@ -487,7 +562,14 @@ export function drawCharacter(
   const rng = new Rng(`${g.seed}::draw::${g.index}`)
   const noise = new Noise(rng.fork('noise'))
 
-  const head = headOutline(g, noise)
+  // A head alone, or a head on a bust. The whole composition changes, not
+  // just the mark-making: there is no neck, no garment and no caption under a
+  // floating head, and the head has to sit in the middle of the cell rather
+  // than in the top third where a bust puts it.
+  const headOnly = style.composition === 'head'
+  // Floored at 1: a trained hand pushes proportions *less*, but shrinking the
+  // profile deviations would make its heads more alike, not more accurate.
+  const head = headOutline(g, noise, Math.max(1, style.exaggeration))
   const torso = torsoOutline(g)
   const lx = Math.cos(g.lightAngle)
   const ly = Math.sin(g.lightAngle)
@@ -519,11 +601,16 @@ export function drawCharacter(
 
   // The whole-figure tilt and framing have to be applied inside every buffer,
   // since each is its own coordinate space.
+  // With no body under it the head is free to sit centred and be drawn larger.
+  // Centred, and only slightly larger — the head has to fit with its hair and
+  // whatever is on top of it, and at 1.4 the crowns and hats ran off the cell.
+  const lift = headOnly ? ART.h * 0.46 - g.build.cy : 0
+  const zoom = g.build.frameScale * (headOnly ? 1.12 : 1)
   for (const name of ['wash', 'body', 'hairBack', 'head', 'hairFront', 'extras']) {
     const lctx = stack.ctx(name)
-    lctx.translate(g.build.cx, g.build.cy)
+    lctx.translate(g.build.cx, g.build.cy + lift)
     lctx.rotate(g.build.tilt)
-    lctx.scale(g.build.frameScale, g.build.frameScale)
+    lctx.scale(zoom, zoom)
     lctx.translate(-g.build.cx, -g.build.cy)
   }
 
@@ -545,17 +632,20 @@ export function drawCharacter(
   // Depth order, back to front. Hair sits behind the head but in *front* of the
   // shoulders, which is what lets long hair fall over a collar.
   s.p = pens.wash
-  drawWash(s)
+  if (style.backdrop === 'patch') drawPatch(s)
+  else drawWash(s)
 
   s.p = pens.body
-  drawExtrasBehind(s)
-  drawNeck(s)
+  if (!headOnly) {
+    drawExtrasBehind(s)
+    drawNeck(s)
   // Mark budget: the face carries the drawing. Left flat, the coat's pattern,
   // pocket, buttons, patches and folds add up to more discrete marks than the
   // head has, and the eye goes to the shirt.
-  s.p.density = 1 - style.hierarchy * 0.42
-  drawGarment(s)
-  s.p.density = 1
+    s.p.density = 1 - style.hierarchy * 0.42
+    drawGarment(s)
+    s.p.density = 1
+  }
 
   s.p = pens.hairBack
   drawHairBack(s)
@@ -579,7 +669,7 @@ export function drawCharacter(
   // Occlusion. Each region is removed from everything behind it, so the head
   // is not a plate laid over the hair — the hair simply is not there where the
   // head is.
-  stack.occlude('body', torso)
+  if (!headOnly) stack.occlude('body', torso)
   if (s.hairBehind) stack.occlude('hairBack', s.hairBehind)
   stack.occlude('head', head)
   if (s.hairFrontRegion) stack.occlude('hairFront', s.hairFrontRegion)
@@ -593,7 +683,9 @@ export function drawCharacter(
   const dropY = -ly * g.build.headRy * 0.1
   const soft = Math.max(2, g.build.headRx * 0.12 * scale)
   const strength = 0.16 * style.modelling
-  stack.castShadow('body', head, dropX, Math.abs(dropY) + g.build.headRy * 0.06, soft, strength)
+  if (!headOnly) {
+    stack.castShadow('body', head, dropX, Math.abs(dropY) + g.build.headRy * 0.06, soft, strength)
+  }
   if (s.hairFrontRegion) {
     stack.castShadow('head', s.hairFrontRegion, dropX * 0.5, g.build.headRy * 0.045, soft * 0.7, strength * 0.9)
   }
@@ -603,7 +695,7 @@ export function drawCharacter(
 
   stack.flush(ctx, ART.w, ART.h)
 
-  if (o.caption) drawCaption(ctx, g, pens.head)
+  if (o.caption && !headOnly) drawCaption(ctx, g, pens.head)
 
   // A final tooth pass over the finished cell. Every render path lays paper
   // down first, so the canvas is opaque here and `multiply` behaves.

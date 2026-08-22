@@ -22,7 +22,7 @@ import {
 import { express } from './phenotype'
 import { WordBag } from './words'
 import type { Genome } from './types'
-import { styleAt, type StyleProfile } from './style'
+import { resolveStyle, styleAt, type StyleProfile } from './style'
 
 export type GenerationMode =
   | 'random' | 'population' | 'outlier' | 'memorable'
@@ -91,7 +91,7 @@ export function modeSetup(
 export interface SheetOptions {
   seed: string
   /** 0 = a child's hand, 1 = a trained illustrator's. */
-  style?: number
+  style?: string
   count: number
   controls: Controls
   mood: Mood
@@ -143,7 +143,7 @@ export function generateSheet(o: SheetOptions): SheetResult {
   // between sheets and stays constant within one — a single artist does not
   // move the lamp between drawings.
   const lightAngle = -Math.PI * 0.72 + (hash01(o.seed) - 0.5) * 0.5
-  const hand = styleAt(o.style ?? 0.85)
+  const hand = resolveStyle(o.style ?? '0.85')
   const vectors: number[][] = []
   const characters: Genome[] = []
 
