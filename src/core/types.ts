@@ -206,6 +206,152 @@ export type FacialHairStyle =
 export type HeadShape = 'round' | 'pear' | 'square' | 'egg' | 'acorn' | 'moon'
 
 /**
+ * The face as parameters.
+ *
+ * Every one of these used to be a `switch` on a style id inside the renderer:
+ * seven lid presets, eight eye outlines, eleven hand-drawn brow spines, six
+ * noses, eight mouths, seven beards. Two characters landing on the same id got
+ * literally the same drawing, and on a 16x16 sheet that is what the repetition
+ * was — not the colour, the geometry.
+ *
+ * The ids survive as *biases* on the ranges these numbers are drawn from (see
+ * `EYE_FAMILIES` and friends in `dna.ts`). The renderer reads the numbers and
+ * branches on no id at all, so a "round" eye and an "almond" one are two draws
+ * from one continuous space rather than two drawings.
+ */
+export interface EyeGeom {
+  /** How much of the opening the upper lid covers, 0..1. 1 with `lidBottom` = shut. */
+  lidTop: number
+  lidBottom: number
+  /** Vertical scale of the whole opening. */
+  tall: number
+  /** Height of the upper and lower lid curves, x eye radius. */
+  topH: number
+  botH: number
+  /** Corner-to-corner width, x eye radius. */
+  widen: number
+  /** Outer corner offset, x eye radius. Positive droops, negative flicks up. */
+  outerDrop: number
+  /** Inner corner offset, x eye radius. */
+  innerDrop: number
+  /** Hooded fold above the lid. 0 = none. */
+  fold: number
+  /** Catchlight size and the four-point flick beside it. 0 = neither. */
+  sparkle: number
+  /** Which eye is shut regardless of the lids. 0 = both open. */
+  winkSide: number
+}
+
+/**
+ * A brow as one spine plus a width that varies along it.
+ *
+ * The eleven literal spines are gone: an arch height, a tilt, a belly position
+ * and two end widths reach all of them and everything between. A unibrow is
+ * not a twelfth shape, it is a large `reach` — both brows extended far enough
+ * inboard that they meet over the bridge.
+ */
+export interface BrowGeom {
+  /** Rise of the middle above the chord, x brow half-length. Negative sags. */
+  arch: number
+  /** Outer end raised against the inner, x brow half-length. Negative = worried. */
+  tilt: number
+  /** Where the arch peaks along the length, 0 = inner end, 1 = outer. */
+  belly: number
+  /** Half-thickness at each end, x brow thickness. */
+  innerW: number
+  outerW: number
+  /** Comma tail hooking down past the outer end, x brow half-length. 0 = none. */
+  hook: number
+  /** Extension inboard past the inner end, x brow half-length. */
+  reach: number
+  /** Drawn as separate hairs rather than as a solid mass, 0..1. */
+  hairy: number
+  /** How far the marks break up, 0 = continuous. */
+  broken: number
+  /** How many hairs the mass is made of, 0..1. */
+  density: number
+}
+
+/**
+ * A nose. Every part of it is a length or a fraction, including how much of it
+ * is drawn as line rather than as shadow — which is the difference between a
+ * cartoon nose and a rendered one, and used to be a hardcoded property of the
+ * style id.
+ */
+export interface NoseGeom {
+  /** Half-width of the tip, x the nose's base width. */
+  width: number
+  /** Height of the tip, x the nose's base height. */
+  tipH: number
+  /** How far the tip hangs below the nose line, x base height. Negative lifts it. */
+  tipDrop: number
+  /** Length of the bridge above the tip, x base height. 0 = no bridge at all. */
+  bridge: number
+  /** Forward curl of the profile, 0 = straight. */
+  hook: number
+  /** Upward curl of the underside, 0 = flat. */
+  upturn: number
+  /** Nostril size, x tip width. 0 = none drawn. */
+  nostril: number
+  /** How strongly the form is outlined, 0..1. */
+  contour: number
+  /** How strongly it is modelled with shadow instead, 0..1. */
+  shadow: number
+}
+
+/**
+ * A mouth. One seam curve with a lens of opening around it — the closed and
+ * open mouths are the same construction with `open` at zero or not, rather
+ * than a smile branch and an "ohh" branch.
+ */
+export interface MouthGeom {
+  /** Corner height against the middle. Positive smiles, negative frowns. */
+  lift: number
+  /** Height of the opening, x mouth half-width. 0 = closed. */
+  open: number
+  /** Lip thickness, x mouth half-width. */
+  upperLip: number
+  lowerLip: number
+  /** How much of the opening the teeth fill, 0..1. */
+  teeth: number
+  /** How far the corners are drawn in toward the middle, 0..1. */
+  pucker: number
+  /** Left/right asymmetry. A smirk is a large one. */
+  skew: number
+}
+
+/**
+ * Facial hair as four masses and a texture rather than as seven drawings.
+ *
+ * A goatee is chin mass with no cheek mass, muttonchops are cheek mass with no
+ * chin, a full beard is both plus jaw coverage, and stubble is all of them at
+ * zero length. The rate at which facial hair is rolled at all is decided in
+ * `genFace` and is not touched here.
+ */
+export interface BeardGeom {
+  /** Mass under the nose, x head half-width. 0 = none. */
+  moustache: number
+  /** Mass on the chin. */
+  chin: number
+  /** Mass on the cheeks and sideburns. */
+  cheek: number
+  /** How far the mass runs along the jaw between the two, 0..1. */
+  jaw: number
+  /** How thick the growth is, 0..1. */
+  density: number
+  /** Hair length, 0 = stubble, 1 = long strands. */
+  length: number
+}
+
+export interface FaceGeom {
+  eye: EyeGeom
+  brow: BrowGeom
+  nose: NoseGeom
+  mouth: MouthGeom
+  beard: BeardGeom
+}
+
+/**
  * Hair as parameters rather than as a fixed list of drawings. A "style" is a
  * preset of these numbers which variation then perturbs, so two characters
  * sharing a style id still do not share hair.
@@ -325,6 +471,8 @@ export interface Asymmetry {
 
 export interface Face {
   eyeShape: EyeShape
+  /** The numbers the renderer actually draws from. The ids above only biased them. */
+  geom: FaceGeom
   /** Scales every feature together — small features on a big face, or the reverse. */
   featureScale: number
   eyeSpacing: number

@@ -9,26 +9,13 @@
  */
 
 import { adjust, shade, tint, hsl, clamp, type Hsl } from '../../core/color'
-import type { BrowStyle, EyeShape, Genome, LidStyle } from '../../core/genome'
+import type { BrowGeom, EyeGeom, Genome } from '../../core/genome'
 import type { Scene } from '../character'
 import { radialFalloff, ellipsoidShade } from '../character'
 import type { Pencil } from '../pencil'
 import { type Pt, arc, quad, blob, withClip, normalAt } from '../shapes'
 
 /* -------------------------------------------------------------------- eyes */
-
-/** How much of the eye each lid covers, per expression. */
-function lidCover(style: LidStyle): { top: number; bottom: number; tall: number } {
-  switch (style) {
-    case 'wide': return { top: 0.02, bottom: 0.04, tall: 1.12 }
-    case 'half': return { top: 0.42, bottom: 0.06, tall: 0.95 }
-    case 'squint': return { top: 0.34, bottom: 0.3, tall: 0.8 }
-    case 'closed': return { top: 1, bottom: 1, tall: 0.9 }
-    case 'sparkle': return { top: 0.04, bottom: 0.02, tall: 1.18 }
-    case 'wink': return { top: 0.08, bottom: 0.05, tall: 1.05 }
-    default: return { top: 0.12, bottom: 0.06, tall: 1 }
-  }
-}
 
 /**
  * The eye opening.
@@ -38,31 +25,16 @@ function lidCover(style: LidStyle): { top: number; bottom: number; tall: number 
  * dropping the outer one gives a droop, lifting it gives an upturn, and moving
  * them together turns a round eye into an almond. Clamping an ellipse can only
  * ever produce one eye shape with more or less of it hidden.
+ *
+ * Which of those it is, is `e` — there is no shape id here any more.
  */
 function eyeOutline(
-  cx: number, cy: number, rx: number, ry: number, shape: EyeShape, side: -1 | 1,
+  cx: number, cy: number, rx: number, ry: number, e: EyeGeom, side: -1 | 1,
 ): Pt[] {
-  let topH = ry
-  let botH = ry
-  let outerDrop = 0
-  let innerDrop = 0
-  let widen = 1
-
-  switch (shape) {
-    case 'almond': topH = ry * 0.86; botH = ry * 0.7; widen = 1.12; break
-    case 'narrow': topH = ry * 0.5; botH = ry * 0.42; widen = 1.25; break
-    case 'droop': topH = ry * 0.82; botH = ry * 0.72; outerDrop = ry * 0.46; break
-    case 'upturn': topH = ry * 0.82; botH = ry * 0.72; outerDrop = -ry * 0.42; innerDrop = ry * 0.14; break
-    case 'wide': topH = ry * 1.18; botH = ry * 1.06; break
-    case 'dot': topH = ry * 0.56; botH = ry * 0.56; widen = 0.62; break
-    case 'hooded': topH = ry * 0.58; botH = ry * 0.9; outerDrop = ry * 0.2; break
-    default: break
-  }
-
-  const inner = { x: cx - side * rx * widen, y: cy + innerDrop }
-  const outer = { x: cx + side * rx * widen, y: cy + outerDrop }
-  const top = quad(inner, { x: cx, y: cy - topH * 1.4 }, outer, 11)
-  const bottom = quad(outer, { x: cx, y: cy + botH * 1.3 }, inner, 11)
+  const inner = { x: cx - side * rx * e.widen, y: cy + ry * e.innerDrop }
+  const outer = { x: cx + side * rx * e.widen, y: cy + ry * e.outerDrop }
+  const top = quad(inner, { x: cx, y: cy - ry * e.topH * 1.4 }, outer, 11)
+  const bottom = quad(outer, { x: cx, y: cy + ry * e.botH * 1.3 }, inner, 11)
   return [...top, ...bottom.slice(1, -1)]
 }
 
@@ -74,18 +46,20 @@ function applyLids(pts: Pt[], cy: number, ry: number, top: number, bottom: numbe
 }
 
 function drawOneEye(
-  p: Pencil, g: Genome, cx: number, cy: number, r: number, style: LidStyle,
+  p: Pencil, g: Genome, cx: number, cy: number, r: number, e: EyeGeom,
   iris: Hsl, flip: number, lane: number,
 ): void {
   const pal = g.palette
   const f = g.face
   const rng = p.rng
-  const cover = lidCover(style)
   const rx = r * rng.range(0.95, 1.05)
-  const ry = r * cover.tall * rng.range(0.95, 1.05)
+  const ry = r * e.tall * rng.range(0.95, 1.05)
   const ink = adjust(pal.ink, -4, 6)
 
-  if (style === 'closed' || (style === 'wink' && flip < 0)) {
+  // Shut when both lids are all the way down, or when this is the winking
+  // side. A blink is the far end of the lid range, not a separate drawing.
+  const shut = e.winkSide === flip ? 1 : Math.min(e.lidTop, e.lidBottom)
+  if (shut > 0.8) {
     // A closed eye is one confident curve plus a lash or two.
     const lid = quad(
       { x: cx - rx, y: cy },
@@ -134,8 +108,8 @@ function drawOneEye(
   }
 
   const region = applyLids(
-    eyeOutline(cx, cy, rx, ry, f.eyeShape, flip as -1 | 1),
-    cy, ry, cover.top, cover.bottom,
+    eyeOutline(cx, cy, rx, ry, e, flip as -1 | 1),
+    cy, ry, e.lidTop, e.lidBottom,
   )
 
   // 1. The sclera is a near-white ball, laid opaque. Hatching it at alpha 0.05
@@ -163,7 +137,7 @@ function drawOneEye(
   const irisRegion = arc(gx, gy, ir, ir, 0, Math.PI * 2, 26)
   const hlx = gx - ir * 0.42
   const hly = gy - ir * 0.44
-  const hlr = ir * (style === 'sparkle' ? 0.5 : 0.34)
+  const hlr = ir * (0.34 + e.sparkle * 0.18)
 
   withClip(p.ctx, [region], () => {
     // 3. The iris: a hard-edged disc, darker at its rim than at its centre.
@@ -232,16 +206,19 @@ function drawOneEye(
     color: ink, alpha: 0.1, width: 1.1, passes: 1, wobble: 0.4, taper: 0.6, lane: lane + 30,
   })
 
-  if (f.eyeShape === 'hooded') {
+  if (e.fold > 0.05) {
     // The fold is the point of a hooded eye; without it the shape just reads
-    // as a small one.
+    // as a small one. It rides the same number that made the lid low.
     p.stroke(
       quad(
-        { x: cx - flip * rx * 1.25, y: cy - ry * 0.6 },
-        { x: cx, y: cy - ry * 1.5 },
-        { x: cx + flip * rx * 1.3, y: cy - ry * 0.3 }, 12,
+        { x: cx - flip * rx * 1.25, y: cy - ry * (0.35 + e.fold * 0.3) },
+        { x: cx, y: cy - ry * (0.9 + e.fold * 0.7) },
+        { x: cx + flip * rx * 1.3, y: cy - ry * (0.1 + e.fold * 0.24) }, 12,
       ),
-      { color: ink, alpha: 0.16, width: 1.4, passes: 1, wobble: 0.5, taper: 0.6, lane: lane + 44 },
+      {
+        color: ink, alpha: 0.08 + e.fold * 0.1, width: 1.4, passes: 1,
+        wobble: 0.5, taper: 0.6, lane: lane + 44,
+      },
     )
   }
 
@@ -256,13 +233,14 @@ function drawOneEye(
     }
   }
 
-  if (style === 'sparkle') {
+  if (e.sparkle > 0.4) {
     // A four-point flick just outside the iris.
     const sx = gx + ir * 0.9
     const sy = gy - ir * 0.9
+    const len = 2.4 + e.sparkle * 2.2
     for (const [dx, dy] of [[1, 0], [0, 1]] as const) {
       p.stroke(
-        [{ x: sx - dx * 4, y: sy - dy * 4 }, { x: sx + dx * 4, y: sy + dy * 4 }],
+        [{ x: sx - dx * len, y: sy - dy * len }, { x: sx + dx * len, y: sy + dy * len }],
         { color: pal.accent, alpha: 0.3, width: 1.2, passes: 1, taper: 0.9, lane: lane + 40 },
       )
     }
@@ -286,16 +264,21 @@ function drawEyes(s: Scene): void {
     const iris = side < 0 && f.irisAlt ? f.irisAlt : f.iris
     const clouded = f.cloudyEye === side
     drawOneEye(
-      p, g, cx, cy, r, f.lid,
+      p, g, cx, cy, r, f.geom.eye,
       clouded ? hsl(iris.h, 8, Math.max(58, iris.l + 34)) : iris,
       side, 800 + (side + 1) * 60,
     )
   }
 
   if (f.thirdEye) {
+    // The extra eye is always open and never the one that winks — a third eye
+    // that blinks in sympathy with the other two reads as a smudge.
+    const e = f.geom.eye
     drawOneEye(
       p, g, g.build.cx + turnShift(g) + rng.gauss(0, 1.5), g.build.cy - g.build.headRy * 0.44,
-      f.eyeR * 0.72, 'open', f.iris, 1, 940,
+      f.eyeR * 0.72,
+      { ...e, winkSide: 0, lidTop: Math.min(e.lidTop, 0.18), lidBottom: Math.min(e.lidBottom, 0.1) },
+      f.iris, 1, 940,
     )
   }
 }
@@ -305,112 +288,64 @@ function drawEyes(s: Scene): void {
 /**
  * A brow as a ribbon: a spine plus a width that varies along it.
  *
- * This is what makes the twelve styles genuinely different shapes rather than
- * the same arc drawn heavier or lighter. A wedge is thick at the inner end and
- * gone by the outer; a comma hooks downward; a bar is a flat slab with blunt
- * ends. Those are different spines and different width functions, not one
- * curve with a thickness parameter.
+ * There used to be eleven literal spines in here, one per style id, which is
+ * why two "bushy" brows on a sheet were the same brow. They are one curve now:
+ * an arch height, an inner-to-outer tilt, where along the length the arch
+ * peaks, a width at each end, an optional comma tail and an optional reach
+ * inboard toward the bridge. A unibrow is not a twelfth case, it is that reach
+ * taken far enough that the two brows meet.
  */
-interface BrowSpec {
+interface BrowRibbon {
   spine: Pt[]
   /** Half-thickness at position `t` along the spine, 0..1. */
   widthAt: (t: number) => number
-  /** Drawn as individual hairs rather than as a solid mass. */
-  hairy: boolean
-  /** Broken into separate marks. */
-  broken?: boolean
 }
 
-function browSpec(
-  style: BrowStyle, cx: number, cy: number, w: number, thick: number, side: -1 | 1, lift: number,
-): BrowSpec {
-  const inner = { x: cx - side * w, y: cy }
-  const outer = { x: cx + side * w, y: cy }
-  const T = thick
+function browRibbon(
+  bg: BrowGeom, cx: number, cy: number, w: number, thick: number,
+  side: -1 | 1, lift: number, reachCap: number,
+): BrowRibbon {
+  const innerX = cx - side * w
+  const outerX = cx + side * w
+  const innerY = cy + bg.tilt * w + lift
+  const outerY = cy - bg.tilt * w - lift * 0.4
 
-  switch (style) {
-    case 'bar':
-      return {
-        spine: [{ x: inner.x, y: cy + lift }, { x: outer.x, y: cy - lift * 0.4 }],
-        widthAt: () => T * 1.5,
-        hairy: false,
-      }
-    case 'wedge':
-      return {
-        spine: quad({ x: inner.x, y: cy + lift + 1 }, { x: cx, y: cy - 1 }, { x: outer.x, y: cy - 2 }, 10),
-        // Thick at the nose end, tapering to nothing at the temple.
-        widthAt: (t) => T * (1.9 - t * 1.7),
-        hairy: false,
-      }
-    case 'comma':
-      return {
-        spine: [
-          ...quad({ x: inner.x, y: cy + 2 }, { x: cx - side * w * 0.2, y: cy - 4 }, { x: cx + side * w * 0.6, y: cy - 2 }, 8),
-          ...quad({ x: cx + side * w * 0.6, y: cy - 2 }, { x: outer.x, y: cy + 1 }, { x: cx + side * w * 0.8, y: cy + 5 }, 6).slice(1),
-        ],
-        widthAt: (t) => T * (1.6 - t * 1.2),
-        hairy: false,
-      }
-    case 'dash':
-      return {
-        spine: [{ x: inner.x, y: cy + lift }, { x: outer.x, y: cy - lift }],
-        widthAt: () => T * 0.9,
-        hairy: true,
-        broken: true,
-      }
-    case 'angled':
-      return {
-        spine: [{ x: inner.x, y: cy + w * 0.32 }, { x: outer.x, y: cy - w * 0.24 }],
-        widthAt: (t) => T * (1.5 - t * 0.7),
-        hairy: false,
-      }
-    case 'unibrow':
-      return {
-        // Runs from the temple all the way past the nose bridge.
-        spine: quad({ x: outer.x, y: cy }, { x: cx - side * w * 0.6, y: cy + 2 }, { x: cx - side * w * 2.4, y: cy + 3 }, 12),
-        widthAt: (t) => T * (1.3 - t * 0.3),
-        hairy: true,
-      }
-    case 'arched':
-      return {
-        spine: quad({ x: inner.x, y: cy + 4 + lift }, { x: cx, y: cy - w * 0.42 }, { x: outer.x, y: cy + 3 - lift }, 12),
-        widthAt: (t) => T * (1 + Math.sin(t * Math.PI) * 0.3),
-        hairy: false,
-      }
-    case 'straight':
-      return {
-        spine: [{ x: inner.x, y: cy + lift }, { x: outer.x, y: cy - lift }],
-        widthAt: () => T * 0.75,
-        hairy: true,
-      }
-    case 'thin':
-      return {
-        spine: quad({ x: inner.x, y: cy + 2 }, { x: cx, y: cy - 3 }, { x: outer.x, y: cy + 1 }, 12),
-        widthAt: () => T * 0.45,
-        hairy: false,
-      }
-    case 'bushy':
-      return {
-        spine: quad({ x: inner.x, y: cy + 3 }, { x: cx, y: cy - 4 }, { x: outer.x, y: cy + 1 }, 12),
-        widthAt: (t) => T * (2.2 - t * 0.5),
-        hairy: true,
-      }
-    case 'worried':
-      return {
-        spine: quad(
-          { x: inner.x, y: cy - w * 0.22 },
-          { x: cx, y: cy + 1 },
-          { x: outer.x, y: cy + w * 0.2 }, 12,
-        ),
-        widthAt: (t) => T * (1.2 - t * 0.4),
-        hairy: true,
-      }
-    default:
-      return {
-        spine: quad({ x: inner.x, y: cy + 2 + lift }, { x: cx, y: cy - 3.5 }, { x: outer.x, y: cy + 1 - lift }, 12),
-        widthAt: (t) => T * (1.1 + Math.sin(t * Math.PI) * 0.25),
-        hairy: true,
-      }
+  // Place the quadratic's control point so the arch peaks at `belly` rather
+  // than always at the midpoint — solving for it is what lets the same two
+  // endpoints give a brow that lifts near the nose and one that lifts near the
+  // temple. Bounded away from the ends because the solve divides by b(1-b).
+  const b = clamp(bg.belly, 0.24, 0.76)
+  const px = innerX + (outerX - innerX) * b
+  const py = innerY + (outerY - innerY) * b - bg.arch * w
+  const k = 2 * b * (1 - b)
+  const ctrl = {
+    x: (px - (1 - b) ** 2 * innerX - b * b * outerX) / k,
+    y: (py - (1 - b) ** 2 * innerY - b * b * outerY) / k,
+  }
+  let spine = quad({ x: innerX, y: innerY }, ctrl, { x: outerX, y: outerY }, 12)
+
+  // Inboard extension. Capped at the centre line so two large reaches meet
+  // over the bridge instead of crossing past each other into the far socket.
+  const reach = Math.min(bg.reach * w, reachCap)
+  if (reach > 0.6) {
+    const tip = { x: innerX - side * reach, y: innerY + reach * 0.2 }
+    const lead = quad(tip, { x: innerX - side * reach * 0.5, y: innerY + reach * 0.05 },
+      { x: innerX, y: innerY }, 6)
+    spine = [...lead.slice(0, -1), ...spine]
+  }
+  if (bg.hook > 0.05) {
+    const tail = quad(
+      { x: outerX, y: outerY },
+      { x: outerX + side * bg.hook * w * 0.8, y: outerY + bg.hook * w * 0.2 },
+      { x: outerX + side * bg.hook * w * 0.6, y: outerY + bg.hook * w * 0.95 },
+      6,
+    )
+    spine = [...spine, ...tail.slice(1)]
+  }
+
+  return {
+    spine,
+    widthAt: (t) => thick * (bg.innerW + (bg.outerW - bg.innerW) * t),
   }
 }
 
@@ -433,21 +368,36 @@ function ribbon(spine: readonly Pt[], widthAt: (t: number) => number): Pt[] {
 function drawBrows(s: Scene): void {
   const { p, g } = s
   const f = g.face
+  const bg = f.geom.brow
   const rng = p.rng
   const col = shade(g.palette.hair, 0.6)
   const w = f.eyeR * 1.25
+  // Both brows are always drawn. A unibrow is the pair reaching far enough in
+  // to touch, so the far end of the reach range needs the far brow to exist.
+  const reachCap = Math.max(0, f.eyeSpacing - w)
 
-  // A unibrow is one mark across both eyes, so it is drawn once.
-  const sides: (-1 | 1)[] = f.brow === 'unibrow' ? [1] : [-1, 1]
-
-  for (const side of sides) {
+  for (const side of [-1, 1] as const) {
     const cx = g.build.cx + turnShift(g) + side * f.eyeSpacing
     const cy = f.eyeY - f.eyeR * (1.4 + f.browLift) + (side > 0 ? f.asym.browDY : 0)
     const lift = f.browAngle * side * 6
-    const spec = browSpec(f.brow, cx, cy, w, f.browThick * 1.5, side, lift)
+    const spec = browRibbon(bg, cx, cy, w, f.browThick * 1.5, side, lift, reachCap)
     const lane = 1000 + (side + 1) * 40
+    const shape = ribbon(spec.spine, spec.widthAt)
 
-    if (spec.hairy) {
+    // Hairiness is a blend, not a switch: a brow can be a soft mass with a few
+    // stray hairs over it, which neither of the two old branches could draw.
+    if (bg.hairy < 0.92) {
+      p.hatch(shape, {
+        color: col, alpha: 0.19 * (1 - bg.hairy * 0.85), spacing: 1.5, angle: 1.4,
+        layers: 2, layerTurn: 44, curve: 0.8, lane: lane + 20,
+      })
+      p.contour(shape, {
+        color: shade(col, 0.8), alpha: 0.13 * (1 - bg.hairy), width: 1.1, passes: 1,
+        wobble: 0.8, optional: true, lane: lane + 24,
+      })
+    }
+
+    if (bg.hairy > 0.06) {
       // Individual hairs, laid along the spine and fanning slightly.
       // Short marks lying *within* the ribbon, each covering a fraction of its
       // length. Offsetting a full-length copy of the whole spine once per hair
@@ -455,7 +405,7 @@ function drawBrows(s: Scene): void {
       // lines the width of the brow, and at the focal point of the face that
       // reads as a barcode rather than as hair.
       const n = spec.spine.length
-      const hairs = f.brow === 'bushy' ? 12 : f.brow === 'dash' ? 5 : 8
+      const hairs = Math.round(3 + bg.density * 10)
       for (let i = 0; i < hairs; i++) {
         const t0 = rng.range(0, 0.7)
         const t1 = Math.min(1, t0 + rng.range(0.22, 0.45))
@@ -475,21 +425,10 @@ function drawBrows(s: Scene): void {
           seg.push({ x: q.x + nm.x * d + rng.gauss(0, 0.35), y: q.y + nm.y * d + rng.gauss(0, 0.35) })
         }
         p.stroke(seg, {
-          color: col, alpha: 0.2, width: 1.3, passes: 1, wobble: 0.35,
-          gaps: spec.broken ? 0.28 : 0.05, taper: 0.85, lane: lane + i,
+          color: col, alpha: 0.2 * (0.45 + bg.hairy * 0.55), width: 1.3, passes: 1,
+          wobble: 0.35, gaps: 0.05 + bg.broken, taper: 0.85, lane: lane + i,
         })
       }
-    } else {
-      // A solid mass: hatched across the ribbon, with a firm edge.
-      const shape = ribbon(spec.spine, spec.widthAt)
-      p.hatch(shape, {
-        color: col, alpha: 0.19, spacing: 1.5, angle: 1.4, layers: 2, layerTurn: 44,
-        curve: 0.8, lane: lane + 20,
-      })
-      p.contour(shape, {
-        color: shade(col, 0.8), alpha: 0.13, width: 1.1, passes: 1, wobble: 0.8,
-        optional: true, lane: lane + 24,
-      })
     }
   }
 }
@@ -500,143 +439,156 @@ function drawNose(s: Scene): void {
   const { p, g } = s
   const f = g.face
   const b = g.build
+  const ng = f.geom.nose
   const cx = b.cx + turnShift(g) * 1.35 + f.gazeX * 1.6 + f.asym.noseSkew
   const cy = f.noseY
-  const w = b.headRx * 0.11 * f.noseSize
-  const h = b.headRy * 0.1 * f.noseSize
+  const uw = b.headRx * 0.11 * f.noseSize
+  const uh = b.headRy * 0.1 * f.noseSize
   // Noses run warmer and a touch redder than the rest of the face.
   const col = adjust(g.palette.skin, -6, 22, -8)
   const ink = adjust(g.palette.ink, 6, 4)
 
-  const bulb = (rx: number, ry: number, oy = 0): Pt[] =>
-    blob(cx, cy + oy, rx, ry, p.noise, { wobble: 0.07, lumps: 2, lane: 44, steps: 22 })
-  const bulbAt = (x: number, y: number, rx: number, ry: number): Pt[] =>
-    blob(x, y, rx, ry, p.noise, { wobble: 0.12, lumps: 2, lane: 45, steps: 16 })
+  const rx = uw * 1.15 * ng.width
+  const ry = uh * ng.tipH
+  const tipY = cy + uh * ng.tipDrop
+  // A hook curls toward whichever way the head is turned, so the profile and
+  // the pose agree instead of the nose always pointing the same way.
+  const fwd = b.turn >= 0 ? 1 : -1
+  const hookA = fwd > 0 ? 0.7 : Math.PI - 0.7
+
+  const bulb = (sx: number, sy: number, brx: number, bry: number, lane: number): Pt[] =>
+    blob(sx, sy, brx, bry, p.noise, {
+      wobble: 0.07, lumps: 2, lane, steps: 22,
+      // The hook swells the lower front of the form and the upturn pares the
+      // underside away. Drawn as a separate outline they read as two noses.
+      shape: (a) => 1
+        + ng.hook * 0.3 * Math.max(0, Math.cos(a - hookA)) ** 2
+        - ng.upturn * 0.2 * Math.max(0, Math.sin(a)) ** 2,
+    })
+
+  const shape = bulb(cx, tipY, rx, ry, 44)
 
   if (p.hand.construction < 0.5) {
     // The symbol for a nose: a small closed shape and two dots, outlined.
-    const shape = bulb(w * 1.2, h * 1.05)
     p.hatch(shape, { color: col, alpha: 0.12, spacing: 2, angle: 0.6, layers: 1, lane: 1124 })
     p.contour(shape, { color: ink, alpha: 0.3, width: 1.8, passes: 2, wobble: 1, lane: 1126 })
     for (const side of [-1, 1] as const) {
-      p.stroke(arc(cx + side * w * 0.55, cy + h * 0.3, w * 0.16, h * 0.14, 0, Math.PI * 2, 8), {
+      p.stroke(arc(cx + side * rx * 0.55, tipY + ry * 0.3, rx * 0.16, ry * 0.14, 0, Math.PI * 2, 8), {
         color: ink, alpha: 0.32, width: 1.6, passes: 2, lane: 1130 + side,
       })
     }
     return
   }
 
-  switch (f.nose) {
-    case 'beak': {
-      const path = [
-        { x: cx - w * 0.3, y: cy - h * 2.2 },
-        { x: cx + w * 0.5, y: cy - h * 0.4 },
-        { x: cx + w * 0.2, y: cy + h },
-        { x: cx - w * 0.9, y: cy + h * 0.9 },
-      ]
-      p.hatch(path, { color: col, alpha: 0.1, spacing: 2, angle: 1, layers: 2, lane: 1100 })
-      p.contour(path, { color: ink, alpha: 0.16, width: 1.3, passes: 1, closed: false, optional: true, lane: 1104 })
-      break
-    }
-    case 'long': {
-      p.stroke([{ x: cx - w * 0.2, y: cy - h * 2.6 }, { x: cx - w * 0.4, y: cy + h * 0.6 }], {
-        color: ink, alpha: 0.14, width: 1.2, passes: 1, taper: 0.7, lane: 1108,
-      })
-      const tip = bulb(w * 0.8, h * 0.8)
-      p.hatch(tip, { color: col, alpha: 0.12, spacing: 1.8, angle: 0.8, layers: 2, lane: 1110 })
-      p.contour(tip, { color: ink, alpha: 0.14, width: 1.2, passes: 1, optional: true, lane: 1112 })
-      break
-    }
-    case 'upturned': {
-      const path = quad(
-        { x: cx - w * 1.2, y: cy - h * 0.2 }, { x: cx - w * 0.2, y: cy + h * 1.5 }, { x: cx + w * 1.1, y: cy - h * 0.6 }, 12,
-      )
-      p.stroke(path, { color: ink, alpha: 0.2, width: 1.6, passes: 2, wobble: 0.3, taper: 0.4, lane: 1116 })
-      p.hatch(bulb(w, h * 0.85, -h * 0.2), { color: col, alpha: 0.1, spacing: 2, angle: 0.6, layers: 1, lane: 1118 })
-      break
-    }
-    case 'broad': {
-      const shape = bulb(w * 1.7, h * 1.05)
-      p.hatch(shape, {
-        color: col, alpha: 0.1, spacing: 2, angle: 0.7, layers: 2, lane: 1120,
-        pressure: radialFalloff(cx - w * 0.5, cy - h * 0.4, w * 3, 0.8),
-      })
-      p.contour(shape, { color: ink, alpha: 0.13, width: 1.2, passes: 1, optional: true, lane: 1122 })
-      break
-    }
-    default: {
-      // The reference's nose is a lit ball in a *different, more saturated
-      // hue* than the surrounding skin — the chroma peak of the whole picture —
-      // with a bare-paper light plane, a crescent core shadow, a soft cast
-      // shadow onto the philtrum, and no outline anywhere on it. It was an
-      // evenly smudged disc inside a ring.
-      const rx = f.nose === 'blob' ? w * 1.45 : w * 1.15
-      const ry = f.nose === 'blob' ? h * 1.25 : h
-      const shape = bulb(rx, ry)
-      const lit = ellipsoidShade(cx, cy, rx, ry, s.lx, s.ly, 1.3)
+  // The reference's nose is a lit ball in a *different, more saturated hue*
+  // than the surrounding skin — the chroma peak of the whole picture — with a
+  // bare-paper light plane, a crescent core shadow, a soft cast shadow onto
+  // the philtrum, and no outline anywhere on it. It was an evenly smudged disc
+  // inside a ring. How much of that survives against a plain drawn line is
+  // `contour` against `shadow`, which used to be a property of the style id:
+  // a beak was always a line and a button was always a ball.
+  const lit = ellipsoidShade(cx, tipY, rx, ry, s.lx, s.ly, 1.3)
+  p.hatch(shape, {
+    color: g.palette.noseAccent,
+    alpha: 0.1 + ng.shadow * 0.09,
+    spacing: 1.6,
+    angle: 0.75,
+    layers: 2,
+    layerTurn: 44,
+    lane: 1124,
+    pressure: (x, y) => clamp(0.25 + lit(x, y) * 1.1, 0, 1),
+  })
+  // The core shadow: a crescent inside the form, not a rim.
+  p.hatch(shape, {
+    color: shade(g.palette.noseAccent, 1.6),
+    alpha: 0.16 * ng.shadow,
+    spacing: 1.8,
+    angle: 1.3,
+    layers: 1,
+    lane: 1125,
+    pressure: (x, y) => clamp((lit(x, y) - 0.45) * 2.2, 0, 1),
+  })
 
-      // Local colour, kept off the light plane.
-      p.hatch(shape, {
-        color: g.palette.noseAccent,
-        alpha: 0.17,
-        spacing: 1.6,
-        angle: 0.75,
-        layers: 2,
-        layerTurn: 44,
-        lane: 1124,
-        pressure: (x, y) => clamp(0.25 + lit(x, y) * 1.1, 0, 1),
-      })
-      // The core shadow: a crescent inside the form, not a rim.
-      p.hatch(shape, {
-        color: shade(g.palette.noseAccent, 1.6),
-        alpha: 0.16,
-        spacing: 1.8,
-        angle: 1.3,
+  const bridgeTop = tipY - uh * ng.bridge
+  if (ng.bridge > 0.2 && p.hand.construction > 0.5) {
+    // The bridge: two soft planes running up to the brow, no line.
+    p.hatch(
+      [{ x: cx - rx * 0.75, y: tipY - ry * 0.4 }, { x: cx + rx * 0.75, y: tipY - ry * 0.4 },
+        { x: cx + rx * 0.42, y: bridgeTop }, { x: cx - rx * 0.42, y: bridgeTop }],
+      {
+        color: shade(g.palette.skin, 1.1),
+        alpha: 0.07 * ng.shadow,
+        spacing: 2.4,
+        angle: 1.5,
         layers: 1,
-        lane: 1125,
-        pressure: (x, y) => clamp((lit(x, y) - 0.45) * 2.2, 0, 1),
-      })
-      // The bridge: two soft planes running up to the brow, no line.
-      if (p.hand.construction > 0.5) {
-        p.hatch(
-          [{ x: cx - rx * 0.75, y: cy - ry * 0.4 }, { x: cx + rx * 0.75, y: cy - ry * 0.4 },
-            { x: cx + rx * 0.42, y: cy - ry * 3.2 }, { x: cx - rx * 0.42, y: cy - ry * 3.2 }],
-          {
-            color: shade(g.palette.skin, 1.1),
-            alpha: 0.07,
-            spacing: 2.4,
-            angle: 1.5,
-            layers: 1,
-            gaps: 0.4,
-            lane: 1127,
-            pressure: (x) => clamp((x - cx) / (rx * 1.5) * s.lx > 0 ? 0.9 : 0.25, 0, 1),
-          },
-        )
-        // Cast shadow onto the philtrum.
-        p.hatch(
-          bulbAt(cx + s.lx * rx * 0.5, cy + ry * 1.15, rx * 0.7, ry * 0.5),
-          {
-            color: shade(g.palette.skin, 1.5), alpha: 0.11, spacing: 1.8, angle: 0.4,
-            layers: 1, gaps: 0.35, lane: 1128,
-          },
-        )
-      }
-      // Outlined only by an untrained hand.
-      p.contour(shape, {
-        color: ink, alpha: 0.13, width: 1.2, passes: 1,
-        heavyAngle: Math.PI * 0.55, heavyAmount: 0.5, optional: true, lane: 1126,
-      })
-    }
+        gaps: 0.4,
+        lane: 1127,
+        pressure: (x) => clamp((x - cx) / (rx * 1.5) * s.lx > 0 ? 0.9 : 0.25, 0, 1),
+      },
+    )
+    // Cast shadow onto the philtrum.
+    p.hatch(
+      blob(cx + s.lx * rx * 0.5, tipY + ry * 1.15, rx * 0.7, ry * 0.5, p.noise,
+        { wobble: 0.12, lumps: 2, lane: 45, steps: 16 }),
+      {
+        color: shade(g.palette.skin, 1.5), alpha: 0.11 * ng.shadow, spacing: 1.8, angle: 0.4,
+        layers: 1, gaps: 0.35, lane: 1128,
+      },
+    )
   }
 
+  // The profile. One line from the brow down the ridge to the tip, bowing
+  // forward with the hook — this is the whole of what made a beak a beak.
+  if (ng.bridge > 0.2 && ng.contour > 0.25) {
+    p.stroke(
+      quad(
+        { x: cx - fwd * rx * 0.28, y: bridgeTop },
+        { x: cx + fwd * rx * (0.1 + ng.hook * 0.85), y: tipY - ry * 0.5 },
+        { x: cx + fwd * rx * (0.05 + ng.hook * 0.4), y: tipY + ry * 0.45 },
+        12,
+      ),
+      {
+        color: ink, alpha: 0.06 + ng.contour * 0.14, width: 1.3, passes: 1,
+        wobble: 0.3, taper: 0.6, lane: 1108,
+      },
+    )
+  }
+
+  // The underside. Flat on most noses and a genuine upward curve on an
+  // upturned one, which is the only mark that reads that shape at thumbnail.
+  if (ng.upturn > 0.05) {
+    p.stroke(
+      quad(
+        { x: cx - rx * 1.05, y: tipY + ry * 0.1 },
+        { x: cx - rx * 0.15, y: tipY + ry * (1.1 - ng.upturn * 2.2) },
+        { x: cx + rx * 1.05, y: tipY - ry * 0.3 },
+        12,
+      ),
+      {
+        color: ink, alpha: 0.08 + ng.upturn * 0.14, width: 1.5, passes: 2,
+        wobble: 0.3, taper: 0.45, lane: 1116,
+      },
+    )
+  }
+
+  // Outlined only by an untrained hand, or a nose that is meant to be graphic.
+  p.contour(shape, {
+    color: ink, alpha: 0.04 + ng.contour * 0.16, width: 1.2, passes: 1,
+    heavyAngle: Math.PI * 0.55, heavyAmount: 0.5, optional: ng.contour < 0.7, lane: 1126,
+  })
+
   // Nostrils, on all but the daintiest noses.
-  if (f.noseSize > 0.92 && f.nose !== 'upturned') {
+  if (ng.nostril > 0.05) {
     for (const side of [-1, 1] as const) {
-      p.stroke(arc(cx + side * w * 0.85, cy + h * 0.45, w * 0.28, h * 0.22, 0.4, Math.PI * 1.6, 8), {
-        color: shade(g.palette.noseAccent, 2),
-        alpha: p.hand.construction > 0.5 ? 0.24 : 0.2,
-        width: 1.1, passes: 1, lane: 1130 + side,
-      })
+      p.stroke(
+        arc(cx + side * rx * 0.72, tipY + ry * 0.42,
+          rx * 0.24 * ng.nostril, ry * 0.2 * ng.nostril, 0.4, Math.PI * 1.6, 8),
+        {
+          color: shade(g.palette.noseAccent, 2),
+          alpha: (p.hand.construction > 0.5 ? 0.24 : 0.2) * clamp(ng.nostril, 0.4, 1.2),
+          width: 1.1, passes: 1, lane: 1130 + side,
+        },
+      )
     }
   }
 }
@@ -647,6 +599,7 @@ function drawMouth(s: Scene): void {
   const { p, g } = s
   const f = g.face
   const b = g.build
+  const m = f.geom.mouth
   const cx = b.cx + turnShift(g) * 1.15 + f.gazeX * 1.2
   const cy = f.mouthY
   const w = b.headRx * 0.24 * f.mouthW
@@ -669,58 +622,60 @@ function drawMouth(s: Scene): void {
     else p.stroke(tip(pts), { color: ink, alpha, width, passes: 2, wobble: 0.35, taper: 0.45, lane: 1200 })
   }
 
-  switch (f.mouth) {
-    case 'grin':
-      line(quad({ x: cx - w, y: cy - 2 }, { x: cx, y: cy + w * 0.66 }, { x: cx + w, y: cy - 2 }, 14), 0.28, 1.9)
-      for (const side of [-1, 1] as const) {
-        p.stroke([{ x: cx + side * w, y: cy - 2 }, { x: cx + side * (w + 2), y: cy - 5 }], {
-          color: ink, alpha: 0.2, width: 1.2, passes: 1, taper: 0.6, lane: 1204 + side,
-        })
-      }
-      break
-    case 'toothy': {
-      const upper = quad({ x: cx - w, y: cy - 1 }, { x: cx, y: cy + w * 0.5 }, { x: cx + w, y: cy - 1 }, 14)
-      const region = [...upper, { x: cx + w * 0.8, y: cy - 5 }, { x: cx - w * 0.8, y: cy - 5 }]
-      p.hatch(region, { color: shade(lip, 1.6), alpha: 0.14, spacing: 1.8, angle: 1.1, layers: 2, lane: 1208 })
-      // Teeth are gaps in the tone, plus a divider or two.
-      const teeth = f.toothGap ? 2 : 3
+  // One construction for every mouth: two corners, a seam between them, and a
+  // lens of opening around that seam. A closed smile is the lens at zero
+  // height; an "ohh" is a puckered pair of corners with a tall one. The eight
+  // hardcoded mouths were eight unrelated drawings, so a grin and a toothy
+  // grin shared nothing and two smiles shared everything.
+  const half = w * (1 - m.pucker * 0.7)
+  const corner = m.lift * w * 0.18
+  const left = { x: cx - half, y: cy - corner - m.skew * w * 0.1 }
+  const right = { x: cx + half, y: cy - corner + m.skew * w * 0.1 }
+  const seamX = cx + m.skew * w * 0.18
+  const seamY = cy + m.lift * w * 0.4
+  const upper = quad(left, { x: seamX, y: seamY - m.open * w * 0.55 }, right, 14)
+  const lower = quad(right, { x: seamX, y: seamY + m.open * w * 0.6 }, left, 12)
+
+  if (m.open > 0.06) {
+    const cavity = tip([...upper, ...lower.slice(1, -1)])
+    p.hatch(cavity, {
+      color: shade(lip, 1.8), alpha: 0.1 + m.open * 0.08, spacing: 1.7, angle: 1.1,
+      layers: 2, lane: 1208,
+    })
+    p.contour(cavity, {
+      color: ink, alpha: 0.08 + m.open * 0.16, width: 1.4, passes: 1, lane: 1218,
+    })
+
+    if (m.teeth > 0.05) {
+      // Teeth are a band of paper across the top of the opening, not a row of
+      // drawn shapes — at sheet size drawn teeth are a grey smear.
+      const depth = m.open * w * 0.6 * m.teeth
+      const band = tip([...upper, ...upper.map((q) => ({ x: q.x, y: q.y + depth })).reverse()])
+      p.base(band, hsl(48, 10, 96), 0.5 + m.teeth * 0.35)
+      // The gap is a quirk, so it has to survive whatever the teeth are doing.
+      const teeth = Math.max(2, Math.round(1 + m.teeth * 3) + (f.toothGap ? 1 : 0))
       for (let i = 1; i < teeth; i++) {
-        const x = cx - w * 0.55 + (w * 1.1 * i) / teeth
-        p.stroke([{ x, y: cy - 4 }, { x: x + 0.5, y: cy + 1 }], {
-          color: ink, alpha: f.toothGap && i === 1 ? 0.3 : 0.12, width: f.toothGap && i === 1 ? 2.4 : 1, passes: 1, lane: 1212 + i,
+        const x = cx - half * 0.6 + (half * 1.2 * i) / teeth
+        const gap = f.toothGap && i === 1
+        p.stroke(tip([{ x, y: seamY - depth * 0.9 }, { x: x + 0.5, y: seamY + 1 }]), {
+          color: ink, alpha: gap ? 0.3 : 0.12, width: gap ? 2.4 : 1, passes: 1, lane: 1212 + i,
         })
       }
-      line(upper, 0.26, 1.8)
-      break
     }
-    case 'smirk':
-      line(quad(
-        { x: cx - w * 0.9, y: cy + 2 }, { x: cx + w * 0.1, y: cy + w * 0.45 }, { x: cx + w, y: cy - 5 }, 14,
-      ), 0.26, 1.7)
-      break
-    case 'ohh': {
-      const o = arc(cx, cy, w * 0.42, w * 0.5, 0, Math.PI * 2, 18)
-      p.hatch(o, { color: shade(lip, 1.8), alpha: 0.16, spacing: 1.6, angle: 0.9, layers: 2, lane: 1216 })
-      p.contour(o, { color: ink, alpha: 0.24, width: 1.5, passes: 2, lane: 1218 })
-      break
+  }
+
+  line(upper, 0.26 + m.open * 0.04, 1.7 + m.lift * 0.2)
+
+  // Corner flicks — what made a grin a grin. Length follows the lift, so they
+  // vanish on a flat mouth instead of being switched off by an id.
+  if (m.lift > 0.35) {
+    for (const side of [-1, 1] as const) {
+      const end = side < 0 ? left : right
+      p.stroke(tip([end, { x: end.x + side * w * 0.16, y: end.y - m.lift * w * 0.22 }]), {
+        color: ink, alpha: 0.14 + m.lift * 0.08, width: 1.2, passes: 1, taper: 0.6,
+        lane: 1204 + side,
+      })
     }
-    case 'whistle': {
-      const o = arc(cx + w * 0.25, cy, w * 0.3, w * 0.34, 0, Math.PI * 2, 14)
-      p.hatch(o, { color: shade(lip, 1.6), alpha: 0.14, spacing: 1.5, angle: 0.6, layers: 1, lane: 1220 })
-      p.contour(o, { color: ink, alpha: 0.22, width: 1.4, passes: 1, lane: 1222 })
-      break
-    }
-    case 'pout': {
-      const o = arc(cx, cy, w * 0.55, w * 0.34, 0, Math.PI * 2, 16)
-      p.hatch(o, { color: lip, alpha: 0.13, spacing: 1.7, angle: 1.2, layers: 2, lane: 1224 })
-      line(arc(cx, cy - 1, w * 0.5, w * 0.18, Math.PI * 0.1, Math.PI * 0.9, 10), 0.2, 1.3)
-      break
-    }
-    case 'flat':
-      line(quad({ x: cx - w * 0.8, y: cy }, { x: cx, y: cy + 2 }, { x: cx + w * 0.8, y: cy - 1 }, 12), 0.24, 1.6)
-      break
-    default:
-      line(quad({ x: cx - w * 0.9, y: cy - 1 }, { x: cx, y: cy + w * 0.5 }, { x: cx + w * 0.9, y: cy - 1 }, 14))
   }
 
   // Lip volume needs room. Stacked into ten pixels on a sheet thumbnail it
@@ -730,34 +685,39 @@ function drawMouth(s: Scene): void {
     // Lip volume: the upper lip turns away from the light and sits in shadow,
     // the lower lip catches it. Drawing the mouth as a single arc — which is
     // what it was — is the schematic a child uses.
+    const up = m.upperLip * w
     const upperLip: Pt[] = [
-      ...tip(quad({ x: cx - w * 0.95, y: cy }, { x: cx, y: cy - w * 0.34 }, { x: cx + w * 0.95, y: cy }, 12)),
-      ...tip(quad({ x: cx + w * 0.95, y: cy }, { x: cx, y: cy + w * 0.06 }, { x: cx - w * 0.95, y: cy }, 8)).slice(1, -1),
+      ...tip(quad({ x: left.x, y: left.y }, { x: seamX, y: seamY - up * 0.34 - m.open * w * 0.55 }, { x: right.x, y: right.y }, 12)),
+      ...tip(upper).slice(1, -1).reverse(),
     ]
     p.hatch(upperLip, {
-      color: shade(lip, 1.2), alpha: 0.15, spacing: 1.6, angle: 1.2, layers: 1, lane: 1232,
+      color: shade(lip, 1.2), alpha: 0.1 + m.upperLip * 0.06, spacing: 1.6, angle: 1.2,
+      layers: 1, lane: 1232,
     })
+    const down = m.lowerLip * w
     const lowerLip: Pt[] = [
-      ...tip(quad({ x: cx - w * 0.8, y: cy + w * 0.06 }, { x: cx, y: cy + w * 0.1 }, { x: cx + w * 0.8, y: cy + w * 0.06 }, 10)),
-      ...tip(quad({ x: cx + w * 0.8, y: cy + w * 0.06 }, { x: cx, y: cy + w * 0.46 }, { x: cx - w * 0.8, y: cy + w * 0.06 }, 10)).slice(1, -1),
+      ...tip(lower),
+      ...tip(quad({ x: left.x, y: left.y }, { x: seamX, y: seamY + m.open * w * 0.6 + down * 0.42 }, { x: right.x, y: right.y }, 10)).slice(1, -1),
     ]
     p.hatch(lowerLip, {
-      color: tint(lip, 0.5), alpha: 0.11, spacing: 1.8, angle: 0.6, layers: 1, lane: 1234,
+      color: tint(lip, 0.5), alpha: 0.08 + m.lowerLip * 0.05, spacing: 1.8, angle: 0.6,
+      layers: 1, lane: 1234,
       // Left lighter where the light lands on the roll of the lip.
       pressure: (_x, y) => clamp((y - cy) / (w * 0.4), 0, 1),
     })
     // The corners are the darkest part of a mouth, and they anchor it.
     for (const side of [-1, 1] as const) {
+      const end = side < 0 ? left : right
       p.stroke(
-        [{ x: cx + side * w * 0.72, y: cy + side * tilt * w * 0.7 },
-          { x: cx + side * w * 0.98, y: cy + side * tilt * w * 0.95 + 1 }],
+        tip([{ x: end.x - side * half * 0.24, y: end.y }, { x: end.x, y: end.y + 1 }]),
         { color: ink, alpha: 0.3, width: 1.6, passes: 1, taper: 0.5, lane: 1236 + side },
       )
     }
   }
 
   // A hint of shadow beneath the lower lip grounds the mouth on the face.
-  p.stroke(arc(cx, cy + w * 0.62, w * 0.5, w * 0.2, Math.PI * 0.15, Math.PI * 0.85, 8), {
+  p.stroke(arc(cx, seamY + m.open * w * 0.6 + w * (0.2 + m.lowerLip * 0.3), w * 0.5, w * 0.2,
+    Math.PI * 0.15, Math.PI * 0.85, 8), {
     color: shade(g.palette.skin, 1.3), alpha: 0.1, width: 2, passes: 1, taper: 0.8, lane: 1230,
   })
 }
@@ -851,87 +811,120 @@ function drawCheeks(s: Scene): void {
   }
 }
 
+/**
+ * Facial hair as four masses and a texture.
+ *
+ * Seven hardcoded drawings meant every goatee was the same goatee. A goatee is
+ * chin mass with no cheek mass, muttonchops are cheek mass with no chin, a
+ * full beard is both plus the jaw between them, and stubble is all of them at
+ * zero length — so the same routine draws all seven and everything between.
+ * Whether a character has facial hair at all is still decided in `genFace`,
+ * and this does not touch that rate.
+ */
 function drawFacialHair(s: Scene): void {
   const { p, g } = s
   const f = g.face
   const b = g.build
-  if (f.facialHair === 'none') return
-  const col = shade(g.palette.hair, 0.5)
-  const chinY = b.cy + b.headRy * 0.72
+  const bg = f.geom.beard
   const rng = p.rng
+  const col = shade(g.palette.hair, 0.5)
+  const len = clamp(bg.length, 0, 1)
+  // How much of the growth reads as a mass rather than as loose grain. Short
+  // and sparse is stubble; long and thick is a slab hanging off the jaw.
+  const solid = bg.density * (0.25 + len * 0.75)
 
-  switch (f.facialHair) {
-    case 'stubble': {
-      const region = blob(b.cx, b.cy + b.headRy * 0.5, b.headRx * 0.78, b.headRy * 0.42, p.noise, {
-        wobble: 0.08, lumps: 2, lane: 77, steps: 24,
+  const mass = (region: Pt[], lane: number): void => {
+    // Only a real mass occludes. Registering stubble as an occluder punched
+    // the shirt out from under a face that had nothing on it but grain.
+    if (solid > 0.4) s.addOccluder('head', region)
+    p.hatch(region, {
+      color: col, alpha: 0.04 + 0.1 * solid, spacing: 2, angle: 1.45,
+      layers: 2, layerTurn: 18, lane,
+    })
+    p.hatch(region, {
+      color: shade(col, 1.6), alpha: 0.06 * solid, spacing: 2.6, angle: 1.2, layers: 1,
+      lane: lane + 4,
+      pressure: (_x, y) => clamp((y - b.cy) / (b.headRy * 0.9), 0, 1),
+    })
+    p.contour(region, {
+      color: shade(col, 1.4), alpha: 0.02 + 0.09 * solid, width: 1.2, passes: 1,
+      wobble: 2, wobbleFreq: 6, optional: solid < 0.3, lane: lane + 8,
+    })
+
+    // Grain where it is short, strands where it is long. Both scale with
+    // density, so a sparse beard is see-through rather than a smaller one.
+    const grains = Math.round(90 * bg.density * (1 - len))
+    if (grains > 4) withClip(p.ctx, [s.head], () => p.fleck(region, col, grains, 0.5))
+
+    const strands = Math.round(len * bg.density * 24)
+    const mid = { x: b.cx, y: b.cy + b.headRy * 0.6 }
+    for (let i = 0; i < strands; i++) {
+      const q = region[rng.int(0, region.length - 1)]!
+      const dx = q.x - mid.x
+      const dy = q.y - mid.y
+      const d = Math.hypot(dx, dy) || 1
+      // Strands that point back up into the face read as a smudge on the cheek.
+      if (dy / d < -0.25) continue
+      const reach = 3 + len * 7
+      p.stroke([q, { x: q.x + (dx / d) * reach, y: q.y + (dy / d) * reach }], {
+        color: col, alpha: 0.1 + solid * 0.08, width: 1, passes: 1, taper: 0.8,
+        lane: lane + 12 + i,
       })
-      withClip(p.ctx, [s.head], () => p.fleck(region, col, 90, 0.5))
-      break
     }
-    case 'moustache': {
-      const y = f.mouthY - b.headRy * 0.1
-      const w = b.headRx * 0.38
-      for (const side of [-1, 1] as const) {
-        const path = quad(
-          { x: b.cx, y: y - 1 },
-          { x: b.cx + side * w * 0.7, y: y + 3 },
-          { x: b.cx + side * w, y: y - 3 },
-          10,
-        )
-        for (let i = 0; i < 6; i++) {
-          p.stroke(path.map((q) => ({ x: q.x, y: q.y + (i - 3) * 0.9 })), {
-            color: col, alpha: 0.16, width: 1.4, passes: 1, wobble: 0.5, taper: 0.7, lane: 1500 + i + side * 10,
-          })
-        }
-      }
-      break
+  }
+
+  // Cheeks and sideburns.
+  if (bg.cheek > 0.06) {
+    for (const side of [-1, 1] as const) {
+      mass(
+        blob(
+          b.cx + side * b.headRx * 0.74, b.cy + b.headRy * (0.34 + bg.cheek * 0.1),
+          b.headRx * (0.09 + bg.cheek * 0.11), b.headRy * (0.12 + bg.cheek * 0.24), p.noise,
+          { wobble: 0.16, lumps: 3, lane: 79 + side, steps: 20 },
+        ),
+        1520 + side * 40,
+      )
     }
-    case 'goatee': {
-      const region = blob(b.cx, chinY, b.headRx * 0.22, b.headRy * 0.16, p.noise, {
-        wobble: 0.14, lumps: 3, lane: 78, steps: 18,
-      })
-      p.hatch(region, { color: col, alpha: 0.14, spacing: 1.8, angle: 1.4, layers: 2, lane: 1510 })
-      p.contour(region, { color: shade(col, 1.2), alpha: 0.1, width: 1.1, passes: 1, wobble: 1.4, lane: 1512 })
-      break
-    }
-    case 'muttonchops': {
-      for (const side of [-1, 1] as const) {
-        const region = blob(
-          b.cx + side * b.headRx * 0.76, b.cy + b.headRy * 0.42,
-          b.headRx * 0.16, b.headRy * 0.3, p.noise,
-          { wobble: 0.16, lumps: 3, lane: 79 + side, steps: 18 },
-        )
-        s.addOccluder('head', region)
-        p.hatch(region, { color: col, alpha: 0.13, spacing: 2, angle: 1.3, layers: 2, lane: 1520 + side * 6 })
-        p.contour(region, { color: shade(col, 1.2), alpha: 0.09, width: 1.1, passes: 1, wobble: 1.6, lane: 1524 })
-      }
-      break
-    }
-    case 'fluff': {
-      for (let i = 0; i < 26; i++) {
-        const a = rng.range(0.25, Math.PI - 0.25)
-        const x = b.cx + Math.cos(a) * b.headRx * 0.82
-        const y = b.cy + Math.sin(a) * b.headRy * 0.82
-        p.stroke([{ x, y }, { x: x + Math.cos(a) * 5, y: y + Math.sin(a) * 5 }], {
-          color: col, alpha: 0.12, width: 1, passes: 1, taper: 0.8, lane: 1530 + i,
+  }
+
+  // Chin and jaw, as one mass — a beard is not a goatee with sideburns bolted
+  // on, it is the same lump grown wide enough to reach them.
+  if (bg.chin + bg.jaw > 0.12) {
+    mass(
+      blob(
+        b.cx, b.cy + b.headRy * (0.74 - bg.jaw * 0.14 - bg.chin * 0.04),
+        b.headRx * (0.1 + bg.chin * 0.16 + bg.jaw * 0.52),
+        b.headRy * (0.06 + bg.chin * 0.16 + bg.jaw * 0.28), p.noise,
+        {
+          wobble: 0.1, lumps: 3.5, lane: 80, steps: 30,
+          shape: (a) => (Math.sin(a) > 0 ? 1.06 : 0.72),
+        },
+      ),
+      1600,
+    )
+  }
+
+  // The moustache is its own mark: strokes swept out from the philtrum, not a
+  // blob, because at this size a blob under the nose reads as a second nose.
+  if (bg.moustache > 0.06) {
+    const mo = bg.moustache
+    const y = f.mouthY - b.headRy * (0.07 + mo * 0.04)
+    const mw = b.headRx * (0.16 + mo * 0.22)
+    const rows = Math.round(3 + mo * 4)
+    for (const side of [-1, 1] as const) {
+      const path = quad(
+        { x: b.cx, y: y - 1 },
+        { x: b.cx + side * mw * 0.7, y: y + 3 },
+        { x: b.cx + side * mw, y: y - 1 - mo * 3 },
+        10,
+      )
+      for (let i = 0; i < rows; i++) {
+        const off = (i - (rows - 1) / 2) * 0.9 * (0.6 + mo * 0.8)
+        p.stroke(path.map((q) => ({ x: q.x, y: q.y + off })), {
+          color: col, alpha: 0.1 + bg.density * 0.09, width: 1.4, passes: 1,
+          wobble: 0.5, gaps: 0.3 * (1 - len), taper: 0.7, lane: 1500 + i + side * 10,
         })
       }
-      break
-    }
-    default: {
-      // Full beard: a mass hugging the jaw, drawn as strands, not as a shape.
-      const region = blob(b.cx, b.cy + b.headRy * 0.62, b.headRx * 0.86, b.headRy * 0.52, p.noise, {
-        wobble: 0.1, lumps: 3.5, lane: 80, steps: 30,
-        shape: (a) => (Math.sin(a) > 0 ? 1.08 : 0.7),
-      })
-      s.addOccluder('head', region)
-      p.hatch(region, { color: col, alpha: 0.1, spacing: 2, angle: 1.45, layers: 2, layerTurn: 18, lane: 1540 })
-      p.hatch(region, {
-        color: shade(col, 1.6), alpha: 0.07, spacing: 2.6, angle: 1.2, layers: 1, lane: 1544,
-        pressure: (_x, y) => clamp((y - b.cy) / (b.headRy * 0.9), 0, 1),
-      })
-      p.contour(region, { color: shade(col, 1.4), alpha: 0.09, width: 1.2, passes: 1, wobble: 2, wobbleFreq: 6, lane: 1548 })
-      break
     }
   }
 }

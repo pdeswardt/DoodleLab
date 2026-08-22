@@ -24,9 +24,10 @@ import { clamp } from './color'
 import { archetypeById, ARCHETYPES, type Archetype, type Role } from './archetypes'
 import { rollQuirks, type AppliedQuirk, type QuirkContext } from './quirks'
 import type {
-  BrowStyle, CollarSpec, CollarStyle, EyeShape, FacialHairStyle, GlassesSpec,
-  GlassesStyle, HatSpec, HatStyle, HatTrim, HeadFamily, HeadShape, LidStyle,
-  MouthStyle, NoseStyle, PatternStyle, ShoulderStyle,
+  BeardGeom, BrowGeom, BrowStyle, CollarSpec, CollarStyle, EyeGeom, EyeShape,
+  FaceGeom, FacialHairStyle, GlassesSpec, GlassesStyle, HatSpec, HatStyle,
+  HatTrim, HeadFamily, HeadShape, LidStyle, MouthGeom, MouthStyle, NoseGeom,
+  NoseStyle, PatternStyle, ShoulderStyle,
 } from './types'
 
 /* ------------------------------------------------------------- subsystems */
@@ -172,6 +173,8 @@ export interface FaceAsymDNA {
 
 export interface FaceDNA {
   eyeShape: EyeShape
+  /** The numbers every facial feature is actually drawn from. */
+  geom: FaceGeom
   /** Scales every feature together, independently of the head it sits on. */
   featureScale: number
   eyeSize: number
@@ -520,6 +523,265 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
   }
 }
 
+/* ------------------------------------------------------- face geometry */
+
+/**
+ * Every facial feature is drawn from one of the parameter spaces below.
+ *
+ * `*_RANGES` are the bounds of the whole space — what a nose *can* be, not
+ * what the average nose is. A `*_FAMILIES` entry constrains only the two or
+ * three numbers that make a style that style; everything else falls through to
+ * the global range, which is what stops two "almond" eyes from being the same
+ * pair of eyes.
+ */
+function spaceFor<K extends string>(
+  rng: Rng, ranges: Record<K, Range>, family: Partial<Record<K, Range>>, c: Controls,
+): { pick: (key: K) => number; maybe: (key: K, chance: number) => number } {
+  // Uniform across the range rather than gaussian about its midpoint: a normal
+  // draw piles most of a sheet into the middle however wide the tails are, and
+  // sameness in the middle is the exact complaint this is fixing.
+  const bias = 0.45 + c.variationStrength * 0.55
+  const pick = (key: K): number => {
+    const [lo, hi] = family[key] ?? ranges[key]
+    const mid = (lo + hi) / 2
+    return mid + (rng.range(lo, hi) - mid) * bias
+  }
+  // Zero-inflated. Whether a face has a hooded fold, a hook in the nose or an
+  // open mouth at all separates two of them further than any amount of it does.
+  const maybe = (key: K, chance: number): number =>
+    family[key] || rng.bool(chance) ? pick(key) : 0
+  return { pick, maybe }
+}
+
+type EyeNumeric =
+  | 'lidTop' | 'lidBottom' | 'tall' | 'topH' | 'botH' | 'widen'
+  | 'outerDrop' | 'innerDrop' | 'fold' | 'sparkle'
+
+const EYE_RANGES: Record<EyeNumeric, Range> = {
+  lidTop: [0.02, 0.4],
+  lidBottom: [0, 0.26],
+  tall: [0.74, 1.2],
+  topH: [0.5, 1.24],
+  botH: [0.42, 1.12],
+  widen: [0.64, 1.3],
+  outerDrop: [-0.42, 0.5],
+  innerDrop: [-0.16, 0.24],
+  fold: [0.3, 1],
+  sparkle: [0.35, 1],
+}
+
+/** The lid decides how much of the opening is covered; not what shape it is. */
+const LID_FAMILIES: Record<LidStyle, Partial<Record<EyeNumeric, Range>>> = {
+  open: { lidTop: [0.04, 0.2], lidBottom: [0, 0.11] },
+  wide: { lidTop: [0, 0.06], lidBottom: [0, 0.07], tall: [1.02, 1.24] },
+  half: { lidTop: [0.32, 0.5], lidBottom: [0, 0.12], tall: [0.86, 1.02] },
+  squint: { lidTop: [0.26, 0.42], lidBottom: [0.2, 0.36], tall: [0.72, 0.92] },
+  // A shut eye is both lids all the way down, not a separate drawing.
+  closed: { lidTop: [1, 1], lidBottom: [1, 1], tall: [0.8, 1] },
+  sparkle: { lidTop: [0, 0.09], lidBottom: [0, 0.06], tall: [1.04, 1.24], sparkle: [0.6, 1] },
+  wink: { lidTop: [0.02, 0.16], lidBottom: [0, 0.1] },
+}
+
+/** The shape decides where the corners sit; not how far the lids come down. */
+const EYE_FAMILIES: Record<EyeShape, Partial<Record<EyeNumeric, Range>>> = {
+  round: { topH: [0.9, 1.16], botH: [0.84, 1.1], widen: [0.88, 1.08] },
+  almond: { topH: [0.76, 0.96], botH: [0.58, 0.8], widen: [1.04, 1.26] },
+  narrow: { topH: [0.42, 0.62], botH: [0.34, 0.52], widen: [1.1, 1.34] },
+  droop: { outerDrop: [0.28, 0.6], topH: [0.7, 0.94], botH: [0.6, 0.86] },
+  upturn: { outerDrop: [-0.52, -0.24], innerDrop: [0.05, 0.24], topH: [0.7, 0.94] },
+  wide: { topH: [1.04, 1.3], botH: [0.94, 1.2] },
+  dot: { topH: [0.44, 0.66], botH: [0.44, 0.66], widen: [0.52, 0.74] },
+  hooded: { topH: [0.5, 0.72], botH: [0.78, 1.02], fold: [0.5, 1], outerDrop: [0.04, 0.3] },
+}
+
+function genEyeGeom(rng: Rng, lid: LidStyle, shape: EyeShape, c: Controls): EyeGeom {
+  const { pick, maybe } = spaceFor<EyeNumeric>(
+    rng, EYE_RANGES, { ...LID_FAMILIES[lid], ...EYE_FAMILIES[shape] }, c,
+  )
+  return {
+    lidTop: pick('lidTop'),
+    lidBottom: pick('lidBottom'),
+    tall: pick('tall'),
+    topH: pick('topH'),
+    botH: pick('botH'),
+    widen: pick('widen'),
+    outerDrop: pick('outerDrop'),
+    innerDrop: pick('innerDrop'),
+    fold: maybe('fold', 0.16),
+    sparkle: maybe('sparkle', 0.1),
+    winkSide: lid === 'wink' ? rng.sign() : 0,
+  }
+}
+
+type BrowNumeric =
+  | 'arch' | 'tilt' | 'belly' | 'innerW' | 'outerW' | 'hook' | 'reach'
+  | 'hairy' | 'broken' | 'density'
+
+const BROW_RANGES: Record<BrowNumeric, Range> = {
+  arch: [-0.12, 0.5],
+  tilt: [-0.34, 0.36],
+  belly: [0.28, 0.72],
+  innerW: [0.45, 2.2],
+  outerW: [0.2, 1.7],
+  hook: [0.2, 0.8],
+  reach: [0.3, 1.9],
+  hairy: [0, 1],
+  broken: [0.12, 0.45],
+  density: [0.3, 1],
+}
+
+const BROW_FAMILIES: Record<BrowStyle, Partial<Record<BrowNumeric, Range>>> = {
+  soft: { arch: [0.1, 0.32], innerW: [0.8, 1.35], outerW: [0.6, 1.15], hairy: [0.5, 1] },
+  bushy: { innerW: [1.55, 2.3], outerW: [1.05, 1.8], hairy: [0.7, 1], density: [0.7, 1] },
+  thin: { innerW: [0.3, 0.62], outerW: [0.25, 0.55], hairy: [0, 0.3] },
+  arched: { arch: [0.3, 0.56], belly: [0.4, 0.62] },
+  straight: { arch: [-0.06, 0.09], innerW: [0.6, 1.15], outerW: [0.55, 1.05] },
+  // Inner ends up and outer ends down — the only brow whose tilt runs negative.
+  worried: { tilt: [-0.4, -0.16], arch: [-0.12, 0.1] },
+  bar: { arch: [-0.05, 0.07], innerW: [1.25, 1.9], outerW: [1.25, 1.9], hairy: [0, 0.25] },
+  wedge: { innerW: [1.5, 2.3], outerW: [0.12, 0.42], hairy: [0, 0.3] },
+  comma: { hook: [0.45, 0.85], innerW: [1.15, 2], outerW: [0.28, 0.7] },
+  dash: { broken: [0.22, 0.48], hairy: [0.6, 1], innerW: [0.5, 0.95], outerW: [0.5, 0.95] },
+  // Not a twelfth shape: a pair of brows that reach far enough in to meet.
+  unibrow: { reach: [1.35, 1.95], hairy: [0.6, 1] },
+  angled: { tilt: [0.2, 0.44], innerW: [1.05, 1.8], outerW: [0.5, 1.05] },
+}
+
+function genBrowGeom(rng: Rng, style: BrowStyle, c: Controls): BrowGeom {
+  const { pick, maybe } = spaceFor<BrowNumeric>(rng, BROW_RANGES, BROW_FAMILIES[style], c)
+  return {
+    arch: pick('arch'),
+    tilt: pick('tilt'),
+    belly: pick('belly'),
+    innerW: pick('innerW'),
+    outerW: pick('outerW'),
+    hook: maybe('hook', 0.18),
+    reach: maybe('reach', 0.2),
+    hairy: pick('hairy'),
+    broken: maybe('broken', 0.12),
+    density: pick('density'),
+  }
+}
+
+type NoseNumeric =
+  | 'width' | 'tipH' | 'tipDrop' | 'bridge' | 'hook' | 'upturn'
+  | 'nostril' | 'contour' | 'shadow'
+
+const NOSE_RANGES: Record<NoseNumeric, Range> = {
+  width: [0.72, 1.75],
+  tipH: [0.6, 1.45],
+  tipDrop: [-0.3, 0.5],
+  bridge: [1, 3.6],
+  hook: [0.2, 0.95],
+  upturn: [0.25, 1],
+  nostril: [0.5, 1.35],
+  contour: [0.1, 1],
+  shadow: [0.35, 1],
+}
+
+const NOSE_FAMILIES: Record<NoseStyle, Partial<Record<NoseNumeric, Range>>> = {
+  button: { width: [0.72, 1.05], tipH: [0.68, 1.05], bridge: [1, 1.9] },
+  beak: { hook: [0.5, 0.95], bridge: [2.2, 3.6], width: [0.7, 1.05], tipDrop: [0.12, 0.5], contour: [0.5, 1] },
+  upturned: { upturn: [0.55, 1], tipDrop: [-0.35, 0.02], width: [0.85, 1.3] },
+  broad: { width: [1.3, 1.8], tipH: [0.85, 1.25], nostril: [0.95, 1.4] },
+  long: { bridge: [2.4, 3.8], tipH: [0.66, 1], tipDrop: [0.2, 0.55] },
+  blob: { width: [1.15, 1.65], tipH: [1.05, 1.5], bridge: [1, 1.7] },
+}
+
+function genNoseGeom(rng: Rng, style: NoseStyle, c: Controls): NoseGeom {
+  const { pick, maybe } = spaceFor<NoseNumeric>(rng, NOSE_RANGES, NOSE_FAMILIES[style], c)
+  return {
+    width: pick('width'),
+    tipH: pick('tipH'),
+    tipDrop: pick('tipDrop'),
+    bridge: maybe('bridge', 0.75),
+    hook: maybe('hook', 0.2),
+    upturn: maybe('upturn', 0.24),
+    nostril: maybe('nostril', 0.66),
+    contour: pick('contour'),
+    shadow: pick('shadow'),
+  }
+}
+
+type MouthNumeric =
+  | 'lift' | 'open' | 'upperLip' | 'lowerLip' | 'teeth' | 'pucker' | 'skew'
+
+const MOUTH_RANGES: Record<MouthNumeric, Range> = {
+  lift: [-0.5, 0.9],
+  open: [0.12, 0.9],
+  upperLip: [0.2, 1.1],
+  lowerLip: [0.3, 1.35],
+  teeth: [0.3, 1],
+  pucker: [0.2, 0.85],
+  skew: [-0.5, 0.5],
+}
+
+const MOUTH_FAMILIES: Record<MouthStyle, Partial<Record<MouthNumeric, Range>>> = {
+  smile: { lift: [0.32, 0.8] },
+  grin: { lift: [0.5, 0.95], open: [0.12, 0.42] },
+  smirk: { skew: [0.28, 0.6], lift: [0.1, 0.5] },
+  ohh: { pucker: [0.5, 0.85], open: [0.55, 0.95], lift: [-0.2, 0.16] },
+  flat: { lift: [-0.16, 0.16] },
+  toothy: { teeth: [0.6, 1], open: [0.3, 0.68], lift: [0.28, 0.8] },
+  pout: { lift: [-0.5, -0.08], lowerLip: [0.9, 1.4], pucker: [0.35, 0.72] },
+  whistle: { pucker: [0.58, 0.9], open: [0.32, 0.7], skew: [0.15, 0.5] },
+}
+
+function genMouthGeom(rng: Rng, style: MouthStyle, c: Controls): MouthGeom {
+  const { pick, maybe } = spaceFor<MouthNumeric>(rng, MOUTH_RANGES, MOUTH_FAMILIES[style], c)
+  const open = maybe('open', 0.3)
+  return {
+    lift: pick('lift'),
+    open,
+    upperLip: pick('upperLip'),
+    lowerLip: pick('lowerLip'),
+    // Teeth need somewhere to be. Rolled independently of the opening they
+    // turned up on closed mouths, where they read as a smear on the lip line.
+    teeth: open > 0.12 ? maybe('teeth', 0.3) : 0,
+    pucker: pick('pucker'),
+    skew: pick('skew'),
+  }
+}
+
+type BeardNumeric = 'moustache' | 'chin' | 'cheek' | 'jaw' | 'density' | 'length'
+
+const BEARD_RANGES: Record<BeardNumeric, Range> = {
+  moustache: [0.3, 1.1],
+  chin: [0.3, 1.1],
+  cheek: [0.25, 1],
+  jaw: [0.2, 1],
+  density: [0.35, 1],
+  length: [0.15, 1],
+}
+
+/**
+ * The masses, not the drawings. A goatee is chin without cheek, muttonchops
+ * are cheek without chin, a full beard is both plus the jaw between them, and
+ * stubble is all three at zero length.
+ */
+const BEARD_FAMILIES: Record<FacialHairStyle, Partial<Record<BeardNumeric, Range>>> = {
+  none: { moustache: [0, 0], chin: [0, 0], cheek: [0, 0], jaw: [0, 0], density: [0, 0], length: [0, 0] },
+  stubble: { length: [0, 0.1], density: [0.5, 1], cheek: [0.5, 1], chin: [0.5, 1], jaw: [0.6, 1] },
+  moustache: { moustache: [0.55, 1.1], chin: [0, 0], cheek: [0, 0], jaw: [0, 0] },
+  goatee: { chin: [0.5, 1.1], cheek: [0, 0], jaw: [0, 0.22] },
+  beard: { chin: [0.6, 1.1], cheek: [0.5, 1], jaw: [0.6, 1], length: [0.4, 1] },
+  muttonchops: { cheek: [0.62, 1], chin: [0, 0], jaw: [0, 0.3] },
+  fluff: { length: [0.5, 1], density: [0.15, 0.42], cheek: [0.3, 0.75], jaw: [0.3, 0.8], chin: [0.2, 0.62] },
+}
+
+function genBeardGeom(rng: Rng, style: FacialHairStyle, c: Controls): BeardGeom {
+  const { pick, maybe } = spaceFor<BeardNumeric>(rng, BEARD_RANGES, BEARD_FAMILIES[style], c)
+  return {
+    // A beard with a moustache and one without are two different faces.
+    moustache: maybe('moustache', 0.55),
+    chin: pick('chin'),
+    cheek: pick('cheek'),
+    jaw: pick('jaw'),
+    density: pick('density'),
+    length: pick('length'),
+  }
+}
+
 /* ----------------------------------------------------------------- stage 4 */
 
 function genFace(rng: Rng, id: IdentityDNA, body: BodyDNA, a: Archetype, c: Controls): FaceDNA {
@@ -583,18 +845,42 @@ function genFace(rng: Rng, id: IdentityDNA, body: BodyDNA, a: Archetype, c: Cont
       ['fluff', 0.7 * (1 - presentation)],
     ])
 
+  const eyeShape = rng.weighted<EyeShape>([
+    ['round', 3 + young * 2],
+    ['almond', 2.6],
+    ['narrow', 1.6 + old * 1.4],
+    ['droop', 1.4 + old * 1.8],
+    ['upturn', 1.6],
+    ['wide', 1.6 + young * 1.6],
+    ['dot', 1 + Math.max(0, id.mass) * 1.2],
+    ['hooded', 1.3 + old * 2 + Math.max(0, id.morph)],
+  ])
+
+  const brow = rng.weighted<BrowStyle>([
+    ['soft', 2.6], ['bushy', 1.2 + id.morph * 2 + old], ['thin', 1.8 - id.morph],
+    ['arched', 1.8], ['straight', 1.4 + id.morph], ['worried', 1.1],
+    ['bar', 1.4 + id.morph * 1.2], ['wedge', 1.4], ['comma', 1.3],
+    ['dash', 1.2 + (1 - id.grooming) * 1.2], ['angled', 1.4],
+    ['unibrow', 0.45 + id.morph * 0.8 + (1 - id.grooming) * 0.6],
+  ])
+
+  const nose = rng.weighted<NoseStyle>([
+    ['button', 4 + young * 2], ['upturned', 2.2], ['blob', 1.8 + id.mass],
+    ['broad', 1.4 + id.mass * 1.2 + id.morph], ['beak', 1.2 + old], ['long', 0.9 + old],
+  ])
+
   const asymScale = 0.4 + c.variationStrength * 1.3
   return {
-    eyeShape: rng.weighted<EyeShape>([
-      ['round', 3 + young * 2],
-      ['almond', 2.6],
-      ['narrow', 1.6 + old * 1.4],
-      ['droop', 1.4 + old * 1.8],
-      ['upturn', 1.6],
-      ['wide', 1.6 + young * 1.6],
-      ['dot', 1 + Math.max(0, id.mass) * 1.2],
-      ['hooded', 1.3 + old * 2 + Math.max(0, id.morph)],
-    ]),
+    eyeShape,
+    // Each feature draws from its own fork, so rerolling the shape of one of
+    // them cannot shift the numbers of the others.
+    geom: {
+      eye: genEyeGeom(rng.fork('eye'), lid, eyeShape, c),
+      brow: genBrowGeom(rng.fork('brow'), brow, c),
+      nose: genNoseGeom(rng.fork('nose'), nose, c),
+      mouth: genMouthGeom(rng.fork('mouth'), mouth, c),
+      beard: genBeardGeom(rng.fork('beard'), facialHair, c),
+    },
     // Two people with the same size head can carry very differently sized
     // features on it, and that reads as strongly as any single proportion.
     featureScale: clamp(rng.gauss(1, 0.11 * v), 0.72, 1.32),
@@ -616,20 +902,11 @@ function genFace(rng: Rng, id: IdentityDNA, body: BodyDNA, a: Archetype, c: Cont
     pupil: clamp(rng.gauss(0.55, 0.05), 0.4, 0.7),
     gazeX: rng.gauss(0, 0.26),
     gazeY: rng.gauss(-0.08, 0.18),
-    brow: rng.weighted<BrowStyle>([
-      ['soft', 2.6], ['bushy', 1.2 + id.morph * 2 + old], ['thin', 1.8 - id.morph],
-      ['arched', 1.8], ['straight', 1.4 + id.morph], ['worried', 1.1],
-      ['bar', 1.4 + id.morph * 1.2], ['wedge', 1.4], ['comma', 1.3],
-      ['dash', 1.2 + (1 - id.grooming) * 1.2], ['angled', 1.4],
-      ['unibrow', 0.45 + id.morph * 0.8 + (1 - id.grooming) * 0.6],
-    ]),
+    brow,
     browThick,
     browLift: clamp(rng.gauss(0.62, 0.22 * v), 0.22, 1.25),
     browAngle: rng.gauss(0, 0.12 * v),
-    nose: rng.weighted<NoseStyle>([
-      ['button', 4 + young * 2], ['upturned', 2.2], ['blob', 1.8 + id.mass],
-      ['broad', 1.4 + id.mass * 1.2 + id.morph], ['beak', 1.2 + old], ['long', 0.9 + old],
-    ]),
+    nose,
     noseSize: clamp(1 + id.morph * 0.14 + old * 0.14 - young * 0.16 + rng.gauss(0, 0.17 * v), 0.62, 1.55),
     noseY: clamp(0.36 + rng.gauss(0, 0.05 * v), 0.24, 0.5),
     mouth,
@@ -1425,6 +1702,31 @@ export function featureVector(dna: CharacterDNA): number[] {
     // The neckline is the top of the garment silhouette and sits directly
     // under the face, so it reads early.
     ...collarFeatures(wardrobe.collarSpec),
+    // The face itself. Two characters can differ on every number above and
+    // still be twins from arm's length if they share their eyes.
+    ...faceFeatures(face.geom),
+  ]
+}
+
+/**
+ * The parts of a face that change how it reads. Weighted so the eyes dominate:
+ * they are what a viewer looks at first and longest, and two faces that differ
+ * only in the nose are the same face.
+ */
+function faceFeatures(fg: FaceGeom): number[] {
+  const { eye, brow, nose, mouth, beard } = fg
+  return [
+    eye.tall * 3, eye.topH * 3, eye.botH * 2.6, eye.widen * 3,
+    eye.outerDrop * 2.4, eye.lidTop * 3.4, eye.lidBottom * 2.4,
+    eye.fold * 1.2 + eye.sparkle * 0.8,
+    brow.arch * 1.6, brow.tilt * 1.6, brow.innerW * 0.8, brow.outerW * 0.8,
+    brow.hairy * 0.7 + brow.hook * 0.6, brow.reach * 0.7,
+    nose.width * 1.1, nose.tipH * 0.8, nose.bridge * 0.3,
+    nose.hook * 0.7 + nose.upturn * 0.7, nose.nostril * 0.4,
+    mouth.lift * 1.5, mouth.open * 1.5, mouth.pucker * 0.9,
+    mouth.upperLip * 0.5 + mouth.lowerLip * 0.5, mouth.teeth * 0.7, mouth.skew * 0.8,
+    beard.moustache * 1.2, beard.chin * 1.2, beard.cheek * 1.2,
+    beard.jaw * 0.8, beard.length * 0.9,
   ]
 }
 

@@ -129,6 +129,15 @@ function expressFace(dna: CharacterDNA, build: Build, hand: StyleProfile): Face 
   const fs = f.featureScale * (0.92 + hand.exaggeration * 0.1)
   return {
     eyeShape: f.eyeShape,
+    // Copied, not shared: quirks rewrite the phenotype in place and must not
+    // reach back into the genotype they were expressed from.
+    geom: {
+      eye: { ...f.geom.eye },
+      brow: { ...f.geom.brow },
+      nose: { ...f.geom.nose },
+      mouth: { ...f.geom.mouth },
+      beard: { ...f.geom.beard },
+    },
     featureScale: fs,
     eyeSpacing: build.headRx * f.eyeSpacing,
     eyeY: build.cy + build.headRy * f.eyeY,
@@ -211,6 +220,10 @@ function applyQuirks(
       case 'toothgap':
         face.toothGap = true
         if (face.mouth !== 'grin' && face.mouth !== 'toothy') face.mouth = 'toothy'
+        // The id no longer decides whether teeth get drawn, the geometry does,
+        // so the mouth has to actually be open for the gap to be in anything.
+        face.geom.mouth.open = Math.max(face.geom.mouth.open, 0.34)
+        face.geom.mouth.teeth = Math.max(face.geom.mouth.teeth, 0.6)
         break
       case 'big-ear':
         face.bigEar = rng.sign() as -1 | 1
