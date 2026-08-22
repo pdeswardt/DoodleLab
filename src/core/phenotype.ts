@@ -331,6 +331,7 @@ export function express(dna: CharacterDNA, o: ExpressOptions): Genome {
 
   const garment: Garment = {
     collar: dna.wardrobe.collar,
+    collarSpec: dna.wardrobe.collarSpec,
     pattern: dna.wardrobe.pattern,
     patternScale: dna.wardrobe.patternScale,
     patternAngle: dna.wardrobe.patternAngle,

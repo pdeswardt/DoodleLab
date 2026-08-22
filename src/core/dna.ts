@@ -24,9 +24,9 @@ import { clamp } from './color'
 import { archetypeById, ARCHETYPES, type Archetype, type Role } from './archetypes'
 import { rollQuirks, type AppliedQuirk, type QuirkContext } from './quirks'
 import type {
-  BrowStyle, CollarStyle, EyeShape, FacialHairStyle, GlassesSpec, GlassesStyle, HatSpec,
-  HatStyle, HatTrim, HeadFamily, HeadShape, LidStyle, MouthStyle, NoseStyle,
-  PatternStyle, ShoulderStyle,
+  BrowStyle, CollarSpec, CollarStyle, EyeShape, FacialHairStyle, GlassesSpec,
+  GlassesStyle, HatSpec, HatStyle, HatTrim, HeadFamily, HeadShape, LidStyle,
+  MouthStyle, NoseStyle, PatternStyle, ShoulderStyle,
 } from './types'
 
 /* ------------------------------------------------------------- subsystems */
@@ -230,6 +230,7 @@ export interface WardrobeDNA {
   pocket: boolean
   lapel: boolean
   scarf: boolean
+  collarSpec: CollarSpec
   hat: HatStyle
   hatSpec: HatSpec
   hatTilt: number
@@ -733,6 +734,91 @@ export function hairHeight(h: HairDNA): number {
  * from scratch. Two beanies on the same sheet share a region of the parameter
  * space and nothing else.
  */
+/** The numeric fields of a collar, all drawn from ranges. */
+type CollarNumeric =
+  | 'openWidth' | 'dropDepth' | 'vee' | 'bandDepth' | 'standHeight' | 'ribs'
+  | 'pointReach' | 'pointDrop' | 'pointSplay' | 'lapel' | 'placket' | 'straps'
+  | 'bib' | 'bibWidth' | 'flap' | 'ruffle' | 'ruffleCount' | 'wrap' | 'strings'
+
+const COLLAR_RANGES: Record<CollarNumeric, Range> = {
+  openWidth: [1.1, 2.1],
+  dropDepth: [8, 44],
+  vee: [0, 1],
+  bandDepth: [4, 16],
+  standHeight: [0, 30],
+  ribs: [3, 9],
+  pointReach: [1.1, 1.9],
+  pointDrop: [12, 30],
+  pointSplay: [0.1, 0.9],
+  lapel: [0.4, 1],
+  placket: [0.5, 1],
+  straps: [4, 12],
+  bib: [18, 40],
+  bibWidth: [1.1, 2],
+  flap: [0.5, 1],
+  ruffle: [5, 12],
+  ruffleCount: [5, 11],
+  wrap: [0.4, 1],
+  strings: [0.5, 1],
+}
+
+/**
+ * A family fixes only the parts that make it that collar. Everything else —
+ * how deep the opening is, whether there is a band, a placket, a ruffle, how
+ * far the points reach — is free, which is what stops two button-ups from
+ * being the same button-up in a different colour.
+ */
+const COLLAR_FAMILIES: Record<CollarStyle, Partial<Record<CollarNumeric, Range>>> = {
+  buttonup: { pointReach: [1.2, 1.9], placket: [0.6, 1], standHeight: [0, 8] },
+  crew: { pointReach: [0, 0], bandDepth: [5, 14], dropDepth: [10, 26] },
+  turtleneck: { pointReach: [0, 0], standHeight: [16, 34], ribs: [4, 9], bandDepth: [10, 20] },
+  vneck: { pointReach: [0, 0], vee: [0.75, 1], dropDepth: [26, 48] },
+  overalls: { straps: [5, 13], bib: [20, 42] },
+  apron: { bib: [16, 38], bibWidth: [1.4, 2.4], straps: [0, 0] },
+  robe: { wrap: [0.5, 1], pointReach: [0, 0] },
+  hoodie: { strings: [0.6, 1], bandDepth: [8, 20], pointReach: [0, 0] },
+  sailor: { flap: [0.6, 1], pointReach: [0, 0] },
+  ruffle: { ruffle: [5, 13], ruffleCount: [5, 11], pointReach: [0, 0] },
+}
+
+function genCollarSpec(rng: Rng, id: CollarStyle, c: Controls): CollarSpec {
+  const family = COLLAR_FAMILIES[id]
+  const bias = 0.45 + c.variationStrength * 0.55
+  const pick = (key: CollarNumeric): number => {
+    const [lo, hi] = family[key] ?? COLLAR_RANGES[key]
+    const mid = (lo + hi) / 2
+    return mid + (rng.range(lo, hi) - mid) * bias
+  }
+  // Absent unless the family calls for it or the roll turns it up. Whether a
+  // collar has a placket at all separates two of them more than any amount of
+  // placket does.
+  const maybe = (key: CollarNumeric, chance: number): number =>
+    family[key] ? pick(key) : rng.bool(chance) ? pick(key) : 0
+
+  return {
+    id,
+    openWidth: pick('openWidth'),
+    dropDepth: pick('dropDepth'),
+    vee: pick('vee'),
+    bandDepth: maybe('bandDepth', 0.6),
+    standHeight: maybe('standHeight', 0.3),
+    ribs: Math.round(maybe('ribs', 0.25)),
+    pointReach: maybe('pointReach', 0.3),
+    pointDrop: pick('pointDrop'),
+    pointSplay: pick('pointSplay'),
+    lapel: maybe('lapel', 0.22),
+    placket: maybe('placket', 0.3),
+    straps: maybe('straps', 0.12),
+    bib: maybe('bib', 0.12),
+    bibWidth: pick('bibWidth'),
+    flap: maybe('flap', 0.1),
+    ruffle: maybe('ruffle', 0.12),
+    ruffleCount: Math.round(pick('ruffleCount')),
+    wrap: maybe('wrap', 0.1),
+    strings: maybe('strings', 0.14),
+  }
+}
+
 /** The numeric fields of a hat, which are all drawn from ranges. */
 type HatNumeric =
   | 'crownW' | 'crownH' | 'seat' | 'crownN' | 'taper' | 'lean' | 'slouch'
@@ -951,6 +1037,7 @@ function genWardrobe(rng: Rng, id: IdentityDNA, hair: HairDNA, a: Archetype, c: 
     lapel: collar === 'buttonup' && rng.bool(0.5),
     // A scarf over a turtleneck is too much bulk for this silhouette.
     scarf: collar !== 'turtleneck' && rng.bool(0.18 + c.memorability * 0.14),
+    collarSpec: genCollarSpec(rng.fork('collar'), collar, c),
     hat,
     hatSpec: genHatSpec(rng.fork('hat'), hat, hair, c),
     hatTilt: rng.gauss(0, 0.13),
@@ -1335,6 +1422,9 @@ export function featureVector(dna: CharacterDNA): number[] {
     ...hatFeatures(wardrobe.hatSpec),
     // Eyewear is the loudest graphic on the face, so its shape counts too.
     ...glassesFeatures(wardrobe.glassesSpec),
+    // The neckline is the top of the garment silhouette and sits directly
+    // under the face, so it reads early.
+    ...collarFeatures(wardrobe.collarSpec),
   ]
 }
 
@@ -1351,6 +1441,17 @@ function hatFeatures(h: HatSpec): number[] {
 function glassesFeatures(sp: GlassesSpec): number[] {
   if (sp.id === 'none') return [0, 0, 0, 0]
   return [sp.lensW * 1.6, sp.lensH * 1.6, sp.lensN * 0.35, sp.flick * 1.4 + sp.halfCut]
+}
+
+/** The parts of a collar that change its shape. */
+function collarFeatures(c: CollarSpec): number[] {
+  return [
+    c.openWidth * 0.9, c.dropDepth * 0.04, c.vee * 0.8,
+    c.standHeight * 0.03 + c.bandDepth * 0.04,
+    c.pointReach * 0.7 + c.pointSplay * 0.4,
+    (c.bib > 0 ? 0.7 : 0) + (c.straps > 0 ? 0.5 : 0) + (c.flap > 0 ? 0.6 : 0)
+      + (c.ruffle > 0 ? 0.6 : 0) + (c.wrap > 0 ? 0.5 : 0),
+  ]
 }
 
 export function featureDistance(a: number[], b: number[]): number {

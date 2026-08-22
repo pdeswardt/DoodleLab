@@ -123,212 +123,196 @@ function drawPattern(p: Pencil, g: Genome, region: Pt[], kind: PatternStyle): vo
 }
 
 /** The neckline opening — everything the collar is cut around. */
-function necklinePath(g: Genome, depth: number, width: number): Pt[] {
-  const b = g.build
-  const top = b.neckY + 2
-  return [
-    { x: b.cx - b.neckW * width, y: top },
-    ...quad(
-      { x: b.cx - b.neckW * width, y: top },
-      { x: b.cx, y: top + depth },
-      { x: b.cx + b.neckW * width, y: top },
-      12,
-    ).slice(1),
-  ]
-}
-
-/** Bottom of the visible figure — collars and bibs must not run past it. */
-
+/**
+ * The neckline, built from `CollarSpec`.
+ *
+ * Ten hardcoded drawings meant every button-up had the same points at the
+ * same angle and every turtleneck the same seven ribs. A collar here is a set
+ * of independent parts — an opening, a band, points, lapels, a placket,
+ * straps, a bib, a flap, a ruffle, a wrap — each present or absent and
+ * continuously sized. Nothing below branches on the family.
+ */
 function drawCollar(s: Scene): void {
   const { p, g } = s
   const b = g.build
+  const c = g.garment.collarSpec
   const hemY = hemFor(g) - 2
   const pal = g.palette
   const alt = pal.garmentAlt
   const ink = adjust(pal.ink, 4, -4)
   const shoulderTip = b.shoulderY + b.shoulderW * b.slope * 0.34 + 12
+  const top = b.neckY + 2
+  const half = b.neckW * c.openWidth
 
-  switch (g.garment.collar) {
-    case 'buttonup': {
-      // Two folded points either side of a placket.
-      for (const side of [-1, 1] as const) {
-        const region: Pt[] = [
-          { x: b.cx + side * b.neckW * 0.2, y: b.neckY + 2 },
-          { x: b.cx + side * b.neckW * 1.5, y: b.neckY + 1 },
-          { x: b.cx + side * b.neckW * 1.15, y: b.neckY + 22 },
-          { x: b.cx + side * b.neckW * 0.12, y: b.neckY + 14 },
-        ]
-        p.hatch(region, { color: alt, alpha: 0.12, spacing: 2.4, angle: 1.1, layers: 2, lane: 1900 + side * 8 })
-        p.contour(region, { color: ink, alpha: 0.15, width: 1.3, passes: 1, lane: 1904 + side * 8 })
-      }
-      // Placket.
-      p.stroke([{ x: b.cx + 3, y: b.neckY + 12 }, { x: b.cx + 5, y: hemY }], {
-        color: ink, alpha: 0.12, width: 1.2, passes: 1, wobble: 0.6, lane: 1908,
-      })
-      if (g.garment.lapel) {
+  // The opening: a round scoop at one end of `vee`, a straight V at the other.
+  const openAt = (u: number): number => {
+    const round = Math.cos((u * Math.PI) / 2)
+    const point = 1 - Math.abs(u)
+    return c.dropDepth * (round * (1 - c.vee) + point * c.vee)
+  }
+  const edge = (widen: number, drop: number, sink: number): Pt[] => {
+    const out: Pt[] = []
+    for (let i = 0; i <= 14; i++) {
+      const u = (i / 14) * 2 - 1
+      out.push({ x: b.cx + u * half * widen, y: top + sink + openAt(u) * drop })
+    }
+    return out
+  }
+
+  // A flap falls behind everything else.
+  if (c.flap > 0.02) {
+    const reach = b.shoulderW * (0.44 + c.flap * 0.26)
+    const flap: Pt[] = [
+      { x: b.cx - reach, y: b.shoulderY + 6 },
+      { x: b.cx - half * 0.75, y: top },
+      { x: b.cx + half * 0.75, y: top },
+      { x: b.cx + reach, y: b.shoulderY + 6 },
+      { x: b.cx + reach * 0.65, y: Math.min(hemY, b.shoulderY + 20 + c.flap * 34) },
+      { x: b.cx - reach * 0.65, y: Math.min(hemY, b.shoulderY + 20 + c.flap * 34) },
+    ]
+    p.hatch(flap, { color: alt, alpha: 0.12, spacing: 2.4, angle: 1.1, layers: 2, lane: 2000 })
+    // Braid lines set in from the edge.
+    for (let i = 0; i < 2; i++) {
+      p.contour(
+        flap.map((q) => ({ x: b.cx + (q.x - b.cx) * (0.92 - i * 0.06), y: q.y + i * 3 + 2 })),
+        { color: tint(alt, 1.8), alpha: 0.16, width: 1.4, passes: 1, lane: 2004 + i },
+      )
+    }
+    p.contour(flap, { color: ink, alpha: 0.13, width: 1.2, passes: 1, lane: 2008 })
+  }
+
+  // A bib across the chest, and the straps that hold it up.
+  if (c.bib > 0.5) {
+    const bw = b.neckW * c.bibWidth
+    const bibTop = b.neckY + c.bib
+    if (bibTop < hemY - 6) {
+      const bib: Pt[] = [
+        { x: b.cx - bw, y: bibTop },
+        { x: b.cx + bw, y: bibTop },
+        { x: b.cx + bw * 1.08, y: hemY },
+        { x: b.cx - bw * 1.08, y: hemY },
+      ]
+      p.hatch(bib, { color: tint(alt, 0.85), alpha: 0.11, spacing: 2.5, angle: 1.42, layers: 2, layerTurn: 14, lane: 1958 })
+      p.contour(bib, { color: ink, alpha: 0.12, width: 1.2, passes: 1, lane: 1960 })
+      if (c.straps < 0.5) {
+        // No shoulder straps, so it hangs from the neck instead.
         for (const side of [-1, 1] as const) {
-          p.stroke(
-            [{ x: b.cx + side * b.neckW * 1.4, y: b.neckY + 6 }, { x: b.cx + side * b.neckW * 0.6, y: hemY - 24 }],
-            { color: ink, alpha: 0.1, width: 1.1, passes: 1, wobble: 0.7, lane: 1912 + side },
-          )
+          p.stroke(quad(
+            { x: b.cx + side * bw * 0.94, y: bibTop },
+            { x: b.cx + side * b.neckW * 1.3, y: b.neckY - 2 },
+            { x: b.cx + side * b.neckW * 0.9, y: b.neckY - 12 }, 10,
+          ), { color: ink, alpha: 0.13, width: 2, passes: 1, wobble: 0.5, lane: 1974 + side })
         }
       }
-      break
     }
-    case 'crew': {
-      const band = [
-        ...necklinePath(g, 16, 1.5),
-        ...necklinePath(g, 24, 1.62).reverse(),
+  }
+  if (c.straps > 0.5) {
+    for (const side of [-1, 1] as const) {
+      const w = c.straps
+      const strap: Pt[] = [
+        { x: b.cx + side * (b.neckW * 0.5), y: hemY - 8 },
+        { x: b.cx + side * b.shoulderW * 0.52, y: shoulderTip + 4 },
+        { x: b.cx + side * (b.shoulderW * 0.52 + w * 1.6), y: shoulderTip + 8 },
+        { x: b.cx + side * (b.neckW * 0.5 + w * 1.4), y: hemY - 6 },
       ]
-      p.hatch(band, { color: alt, alpha: 0.14, spacing: 2.2, angle: 0.9, layers: 2, lane: 1920 })
-      p.contour(band, { color: ink, alpha: 0.13, width: 1.2, passes: 1, optional: true, lane: 1922 })
-      break
+      p.hatch(strap, { color: alt, alpha: 0.14, spacing: 2.2, angle: 1.2, layers: 2, lane: 1950 + side * 8 })
+      p.contour(strap, { color: ink, alpha: 0.14, width: 1.2, passes: 1, lane: 1954 + side * 8 })
     }
-    case 'turtleneck': {
-      // Rolled, not rectangular: the top edge curves under the jaw.
-      const region = [
-        ...quad(
-          { x: b.cx - b.neckW * 1.4, y: b.neckY - 12 },
-          { x: b.cx, y: b.neckY - 24 },
-          { x: b.cx + b.neckW * 1.4, y: b.neckY - 12 }, 12,
-        ),
-        ...quad(
-          { x: b.cx + b.neckW * 1.52, y: b.neckY + 18 },
-          { x: b.cx, y: b.neckY + 28 },
-          { x: b.cx - b.neckW * 1.52, y: b.neckY + 18 }, 12,
-        ),
+  }
+
+  // Crossed panels — one wrap direction for both sides, or they meet in an X.
+  if (c.wrap > 0.02) {
+    for (const side of [-1, 1] as const) {
+      const panel: Pt[] = [
+        { x: b.cx + side * half * 0.95, y: b.neckY - 2 },
+        { x: b.cx + side * b.neckW * 0.1, y: hemY - 26 * c.wrap },
+        { x: b.cx + side * b.neckW * 0.1, y: hemY },
+        { x: b.cx + side * b.shoulderW * 0.9, y: hemY },
+        { x: b.cx + side * b.shoulderW * 0.8, y: b.neckY + 14 },
       ]
-      p.hatch(region, { color: alt, alpha: 0.13, spacing: 2.2, angle: 1.5, layers: 2, layerTurn: 12, lane: 1930 })
-      // Ribbing.
-      for (let i = -3; i <= 3; i++) {
-        const x = b.cx + i * b.neckW * 0.42
-        p.stroke([{ x, y: b.neckY - 14 }, { x: x + 1, y: b.neckY + 18 }], {
-          color: shade(alt, 1.3), alpha: 0.09, width: 1.1, passes: 1, taper: 0.5, lane: 1934 + i,
-        })
-      }
-      p.contour(region, { color: ink, alpha: 0.14, width: 1.3, passes: 1, lane: 1938 })
-      break
+      p.hatch(panel, {
+        color: side < 0 ? alt : shade(alt, 0.6),
+        alpha: 0.11, spacing: 2.4, angle: 1.2, layers: 2, lane: 1980 + side * 8,
+      })
+      p.contour(panel, { color: ink, alpha: 0.12, width: 1.2, passes: 1, lane: 1984 + side * 8 })
     }
-    case 'vneck': {
-      const region = [
-        { x: b.cx - b.neckW * 1.5, y: b.neckY },
-        { x: b.cx, y: b.neckY + 34 },
-        { x: b.cx + b.neckW * 1.5, y: b.neckY },
-        { x: b.cx + b.neckW * 1.7, y: b.neckY + 8 },
-        { x: b.cx, y: b.neckY + 44 },
-        { x: b.cx - b.neckW * 1.7, y: b.neckY + 8 },
-      ]
-      p.hatch(region, { color: alt, alpha: 0.13, spacing: 2.2, angle: 0.7, layers: 2, lane: 1940 })
-      p.contour(region, { color: ink, alpha: 0.13, width: 1.2, passes: 1, lane: 1942 })
-      break
+  }
+
+  // The band: a strip following the opening, optionally standing above the
+  // neck line. A turtleneck is this and nothing else.
+  if (c.bandDepth > 0.5) {
+    const band = [
+      ...edge(1, 1, -c.standHeight),
+      ...edge(1.06, 1, -c.standHeight + c.bandDepth + c.standHeight).reverse(),
+    ]
+    p.hatch(band, {
+      color: alt, alpha: 0.13, spacing: 2.2, angle: c.standHeight > 10 ? 1.5 : 0.9,
+      layers: 2, layerTurn: 12, lane: 1920,
+    })
+    for (let i = 0; i < c.ribs; i++) {
+      const u = c.ribs === 1 ? 0 : (i / (c.ribs - 1)) * 2 - 1
+      const x = b.cx + u * half * 0.92
+      p.stroke([
+        { x, y: top - c.standHeight + 2 },
+        { x: x + 1, y: top + c.bandDepth + openAt(u) * 0.6 },
+      ], { color: shade(alt, 1.3), alpha: 0.09, width: 1.1, passes: 1, taper: 0.5, lane: 1934 + i })
     }
-    case 'overalls': {
-      for (const side of [-1, 1] as const) {
-        const strap: Pt[] = [
-          { x: b.cx + side * b.neckW * 0.5, y: hemY - 8 },
-          { x: b.cx + side * b.shoulderW * 0.52, y: shoulderTip + 4 },
-          { x: b.cx + side * b.shoulderW * 0.72, y: shoulderTip + 8 },
-          { x: b.cx + side * b.neckW * 1.1, y: hemY - 6 },
-        ]
-        p.hatch(strap, { color: alt, alpha: 0.14, spacing: 2.2, angle: 1.2, layers: 2, lane: 1950 + side * 8 })
-        p.contour(strap, { color: ink, alpha: 0.14, width: 1.2, passes: 1, lane: 1954 + side * 8 })
-      }
-      const bib: Pt[] = [
-        { x: b.cx - b.neckW * 1.25, y: b.neckY + 30 },
-        { x: b.cx + b.neckW * 1.25, y: b.neckY + 30 },
-        { x: b.cx + b.neckW * 1.35, y: hemY },
-        { x: b.cx - b.neckW * 1.35, y: hemY },
+    p.contour(band, { color: ink, alpha: 0.13, width: 1.2, passes: 1, optional: true, lane: 1922 })
+  }
+
+  // Folded points either side of the opening.
+  if (c.pointReach > 0.05) {
+    for (const side of [-1, 1] as const) {
+      const reach = b.neckW * c.pointReach
+      const tipX = b.cx + side * reach * (0.7 + c.pointSplay * 0.6)
+      const tipY = top + c.pointDrop * (1 - c.pointSplay * 0.45)
+      const region: Pt[] = [
+        { x: b.cx + side * b.neckW * 0.2, y: top },
+        { x: b.cx + side * reach, y: top - 1 },
+        { x: tipX, y: tipY },
+        { x: b.cx + side * b.neckW * 0.12, y: top + c.pointDrop * 0.6 },
       ]
-      p.hatch(bib, { color: alt, alpha: 0.1, spacing: 2.6, angle: 1.4, layers: 1, lane: 1958 })
-      p.contour(bib, { color: ink, alpha: 0.12, width: 1.2, passes: 1, closed: false, optional: true, lane: 1960 })
-      break
-    }
-    case 'apron': {
-      const bib: Pt[] = [
-        { x: b.cx - b.headRx * 0.62, y: b.neckY + 26 },
-        { x: b.cx + b.headRx * 0.62, y: b.neckY + 26 },
-        { x: b.cx + b.headRx * 0.7, y: hemY },
-        { x: b.cx - b.headRx * 0.7, y: hemY },
-      ]
-      p.hatch(bib, { color: tint(alt, 0.8), alpha: 0.11, spacing: 2.4, angle: 1.45, layers: 2, layerTurn: 14, lane: 1970 })
-      p.contour(bib, { color: ink, alpha: 0.13, width: 1.2, passes: 1, lane: 1972 })
-      // Neck strap.
-      for (const side of [-1, 1] as const) {
+      p.hatch(region, { color: alt, alpha: 0.12, spacing: 2.4, angle: 1.1, layers: 2, lane: 1900 + side * 8 })
+      p.contour(region, { color: ink, alpha: 0.15, width: 1.3, passes: 1, lane: 1904 + side * 8 })
+      if (c.lapel > 0.02) {
         p.stroke(
-          quad(
-            { x: b.cx + side * b.headRx * 0.6, y: b.neckY + 26 },
-            { x: b.cx + side * b.neckW * 1.3, y: b.neckY - 2 },
-            { x: b.cx + side * b.neckW * 0.9, y: b.neckY - 12 },
-            10,
-          ),
-          { color: ink, alpha: 0.13, width: 2, passes: 1, wobble: 0.5, lane: 1974 + side },
+          [{ x: b.cx + side * reach * 0.94, y: top + 4 },
+            { x: b.cx + side * b.neckW * 0.6, y: hemY - 24 * c.lapel }],
+          { color: ink, alpha: 0.1, width: 1.1, passes: 1, wobble: 0.7, lane: 1912 + side },
         )
       }
-      break
     }
-    case 'robe': {
-      for (const side of [-1, 1] as const) {
-        // Both panels wrap the same way and meet at the centre; mirrored
-        // diagonals were crossing into a literal X.
-        const panel: Pt[] = [
-          { x: b.cx + side * b.neckW * 1.75, y: b.neckY - 2 },
-          { x: b.cx + side * b.neckW * 0.1, y: hemY - 26 },
-          { x: b.cx + side * b.neckW * 0.1, y: hemY },
-          { x: b.cx + side * b.shoulderW * 0.9, y: hemY },
-          { x: b.cx + side * b.shoulderW * 0.8, y: b.neckY + 14 },
-        ]
-        p.hatch(panel, { color: side < 0 ? alt : shade(alt, 0.6), alpha: 0.11, spacing: 2.4, angle: 1.2, layers: 2, lane: 1980 + side * 8 })
-        p.contour(panel, { color: ink, alpha: 0.12, width: 1.2, passes: 1, lane: 1984 + side * 8 })
-      }
-      break
+  }
+
+  if (c.placket > 0.02) {
+    p.stroke([{ x: b.cx + 3, y: top + 10 }, { x: b.cx + 5, y: hemY }], {
+      color: ink, alpha: 0.12 * c.placket, width: 1.2, passes: 1, wobble: 0.6, lane: 1908,
+    })
+  }
+
+  if (c.strings > 0.02) {
+    for (const side of [-1, 1] as const) {
+      p.stroke(
+        [{ x: b.cx + side * 8, y: top + c.bandDepth + 8 },
+          { x: b.cx + side * 11, y: hemY - 30 * c.strings }],
+        { color: tint(alt, 1.6), alpha: 0.2, width: 1.6, passes: 1, wobble: 1, lane: 1994 + side },
+      )
     }
-    case 'hoodie': {
-      const band = [...necklinePath(g, 20, 1.6), ...necklinePath(g, 32, 1.8).reverse()]
-      p.hatch(band, { color: alt, alpha: 0.13, spacing: 2.2, angle: 0.8, layers: 2, lane: 1990 })
-      p.contour(band, { color: ink, alpha: 0.13, width: 1.2, passes: 1, lane: 1992 })
-      // Drawstrings.
-      for (const side of [-1, 1] as const) {
-        p.stroke(
-          [{ x: b.cx + side * 8, y: b.neckY + 22 }, { x: b.cx + side * 11, y: hemY - 30 }],
-          { color: tint(alt, 1.6), alpha: 0.2, width: 1.6, passes: 1, wobble: 1, lane: 1994 + side },
-        )
-      }
-      break
+  }
+
+  // Scallops along the neckline.
+  if (c.ruffle > 0.5) {
+    const n = Math.max(3, c.ruffleCount)
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1)
+      const u = t * 2 - 1
+      const x = b.cx + u * half * 1.05
+      const y = top + 6 + openAt(u) * 0.5
+      const r = c.ruffle * (0.7 + Math.sin(t * Math.PI) * 0.5)
+      const petal = arc(x, y, r, r * 0.85, 0, Math.PI * 2, 14)
+      p.hatch(petal, { color: alt, alpha: 0.1, spacing: 2.2, angle: 0.5 + i, layers: 1, lane: 2010 + i })
+      p.contour(petal, { color: ink, alpha: 0.12, width: 1.1, passes: 1, lane: 2014 + i })
     }
-    case 'sailor': {
-      const flap: Pt[] = [
-        { x: b.cx - b.shoulderW * 0.62, y: b.shoulderY + 6 },
-        { x: b.cx - b.neckW * 1.3, y: b.neckY + 2 },
-        { x: b.cx + b.neckW * 1.3, y: b.neckY + 2 },
-        { x: b.cx + b.shoulderW * 0.62, y: b.shoulderY + 6 },
-        { x: b.cx + b.shoulderW * 0.4, y: b.shoulderY + 40 },
-        { x: b.cx - b.shoulderW * 0.4, y: b.shoulderY + 40 },
-      ]
-      p.hatch(flap, { color: alt, alpha: 0.12, spacing: 2.4, angle: 1.1, layers: 2, lane: 2000 })
-      for (let i = 0; i < 2; i++) {
-        p.contour(
-          flap.map((q) => ({ x: b.cx + (q.x - b.cx) * (0.92 - i * 0.06), y: q.y + i * 3 + 2 })),
-          { color: tint(alt, 1.8), alpha: 0.16, width: 1.4, passes: 1, lane: 2004 + i },
-        )
-      }
-      p.contour(flap, { color: ink, alpha: 0.13, width: 1.2, passes: 1, lane: 2008 })
-      break
-    }
-    case 'ruffle': {
-      const scallops = 7
-      for (let i = 0; i < scallops; i++) {
-        const t = i / (scallops - 1)
-        const x = b.cx + (t - 0.5) * b.neckW * 4.2
-        const y = b.neckY + 8 + Math.sin(t * Math.PI) * 10
-        const r = 7 + Math.sin(t * Math.PI) * 3
-        const petal = arc(x, y, r, r * 0.85, 0, Math.PI * 2, 14)
-        p.hatch(petal, { color: alt, alpha: 0.1, spacing: 2.2, angle: 0.5 + i, layers: 1, lane: 2010 + i })
-        p.contour(petal, { color: ink, alpha: 0.12, width: 1.1, passes: 1, lane: 2014 + i })
-      }
-      break
-    }
-    default:
-      break
   }
 }
 

@@ -46,6 +46,58 @@ export type GlassesStyle = 'none' | 'round' | 'square' | 'halfmoon' | 'monocle' 
 export type HatStyle =
   | 'none' | 'beanie' | 'beret' | 'cap' | 'sunhat' | 'band' | 'crown' | 'kerchief' | 'boat'
 /**
+ * The neckline as parameters. Ten hardcoded collar drawings meant every
+ * button-up on a sheet had the same points at the same angle, and the only
+ * difference between two of them was the colour.
+ *
+ * A collar is not one shape but a set of independent parts — an opening, a
+ * band, folded points, lapels, a placket, straps, a bib, a flap, a ruffle, a
+ * wrap — each of which is present or absent and continuously sized. The
+ * families are regions of that space: a button-up is points plus a placket, a
+ * turtleneck is a tall ribbed band, overalls are straps plus a bib.
+ */
+export interface CollarSpec {
+  id: CollarStyle
+  /** Half-width of the opening, x neck half-width. */
+  openWidth: number
+  /** How far the opening drops below the neck line, in art units. */
+  dropDepth: number
+  /** 0 = a round scoop, 1 = a straight V. */
+  vee: number
+  /** Thickness of the band following the opening. 0 = a raw edge. */
+  bandDepth: number
+  /** How far the band stands above the neck line. A turtleneck is tall here. */
+  standHeight: number
+  /** Ribbing lines drawn on a standing band. */
+  ribs: number
+  /** Reach of the folded points either side, x neck half-width. 0 = none. */
+  pointReach: number
+  /** How far those points fall, in art units. */
+  pointDrop: number
+  /** How far they splay outward against down, 0..1. */
+  pointSplay: number
+  /** Lapels folded back from the points. 0 = none. */
+  lapel: number
+  /** A placket down the front. 0 = none. */
+  placket: number
+  /** Straps over the shoulders, as a width. 0 = none. */
+  straps: number
+  /** A bib panel across the chest. 0 = none, otherwise its top edge in art units. */
+  bib: number
+  /** Half-width of that bib, x neck half-width. */
+  bibWidth: number
+  /** A square flap falling behind the shoulders. 0 = none. */
+  flap: number
+  /** Scalloped ruffle along the neckline. 0 = none. */
+  ruffle: number
+  ruffleCount: number
+  /** Asymmetric crossed panels. 0 = symmetric. */
+  wrap: number
+  /** Drawstrings hanging from the band. 0 = none. */
+  strings: number
+}
+
+/**
  * Eyewear as parameters, for the same reason headwear is. Four fixed lens
  * outlines meant every pair of round glasses on a sheet was the *same* pair.
  * Round, square, half-moon and cat-eye are all one superellipse with a
@@ -315,6 +367,7 @@ export interface Face {
 }
 
 export interface Garment {
+  collarSpec: CollarSpec
   collar: CollarStyle
   pattern: PatternStyle
   patternScale: number
