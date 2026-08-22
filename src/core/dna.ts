@@ -813,11 +813,15 @@ function genCondition(rng: Rng, id: IdentityDNA, c: Controls): ConditionDNA {
 
 /* ----------------------------------------------------------------- stage 8 */
 
+// Ceilinged around 84% lightness. Above that a skin tone is indistinguishable
+// from the paper it is drawn on: the ground lightens it further, the hatching
+// has nothing to darken, and the face renders as a blank with features
+// floating on it.
 const SKIN_TONES: Triple[] = [
-  [28, 48, 88], [26, 52, 83], [24, 50, 77], [22, 46, 70],
+  [28, 48, 83], [26, 52, 81], [24, 50, 77], [22, 46, 70],
   [20, 44, 62], [18, 42, 54], [16, 40, 45], [14, 38, 37],
-  [12, 36, 30], [30, 40, 92], [34, 34, 86], [10, 30, 26],
-  [20, 30, 66], [32, 44, 80], [16, 34, 42],
+  [12, 36, 30], [30, 44, 84], [34, 38, 82], [10, 30, 26],
+  [20, 30, 66], [32, 44, 79], [16, 34, 42],
 ]
 
 const HAIR_TONES: Triple[] = [
@@ -845,7 +849,7 @@ function genPalette(
     skinBase[0] + rng.gauss(0, 4),
     skinBase[1] + rng.gauss(0, 3),
     // Weathered skin reads slightly deeper and ruddier.
-    skinBase[2] + rng.gauss(0, 2.5) - id.exposure * 3,
+    Math.min(85, skinBase[2] + rng.gauss(0, 2.5) - id.exposure * 3),
   ]
 
   // Greying is age-driven and gradual, never a switch.

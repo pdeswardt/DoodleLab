@@ -47,6 +47,19 @@ export function tint(c: Hsl, amount = 1): Hsl {
   return hsl(c.h + 4 * amount, c.s - 6 * amount, c.l + 12 * amount)
 }
 
+/**
+ * The pale ground a form is blocked in with before it is hatched.
+ *
+ * Not simply `tint`: a fixed lightening pushes an already-pale skin tone to
+ * bare paper, and the hatching on top is then too weak to bring it back — the
+ * face samples at 237,234,226 and reads as a blank. This lightens toward a
+ * ceiling instead, so dark forms get a real ground and light ones barely move.
+ */
+export function ground(c: Hsl, amount = 1): Hsl {
+  const headroom = Math.max(0, 92 - c.l)
+  return hsl(c.h + 3 * amount, c.s - 7 * amount, c.l + headroom * 0.42 * amount)
+}
+
 export function mix(a: Hsl, b: Hsl, t: number): Hsl {
   // Interpolate hue the short way around the wheel.
   let dh = b.h - a.h

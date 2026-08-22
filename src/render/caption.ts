@@ -13,7 +13,8 @@ import { ART, type Genome } from '../core/genome'
 import { Pencil } from './pencil'
 import type { Pt } from './shapes'
 
-const FONT_STACK = '"Caveat", "Segoe Script", "Bradley Hand", "Brush Script MT", cursive'
+const FONT_STACK =
+  '"Caveat", "Segoe Script", "Bradley Hand", "Brush Script MT", "Comic Sans MS", cursive'
 
 export function drawCaption(
   ctx: CanvasRenderingContext2D, g: Genome, p: Pencil,
@@ -71,7 +72,27 @@ export function drawCaption(
   octx.textAlign = 'center'
   octx.textBaseline = 'middle'
   octx.fillStyle = '#000'
-  octx.fillText(word, ART.w / 2, boxH / 2 + 1)
+
+  // Letter by letter, each nudged off the baseline and rotated a little.
+  //
+  // The handwriting face is a webfont, and when it fails to load the caption
+  // falls back to a system serif — which renders perfectly level and evenly
+  // spaced, and is then the most mechanical object on a page of hand-drawn
+  // marks. Placing the glyphs individually means the line reads as written by
+  // hand whichever face actually resolves.
+  const jitter = p.rng.fork('caption-letters')
+  const widths = [...word].map((ch) => octx.measureText(ch).width)
+  const total = widths.reduce((a, b) => a + b, 0)
+  let x = ART.w / 2 - total / 2
+  for (const [i, ch] of [...word].entries()) {
+    const cw = widths[i]!
+    octx.save()
+    octx.translate(x + cw / 2, boxH / 2 + 1 + jitter.gauss(0, size * 0.045))
+    octx.rotate(jitter.gauss(0, 0.035))
+    octx.fillText(ch, 0, 0)
+    octx.restore()
+    x += cw * jitter.range(0.94, 1.04)
+  }
 
   // 3. Drop the result onto the sheet.
   ctx.save()

@@ -22,6 +22,7 @@ import {
 import { express } from './phenotype'
 import { WordBag } from './words'
 import type { Genome } from './types'
+import { styleAt, type StyleProfile } from './style'
 
 export type GenerationMode =
   | 'random' | 'population' | 'outlier' | 'memorable'
@@ -89,6 +90,8 @@ export function modeSetup(
 
 export interface SheetOptions {
   seed: string
+  /** 0 = a child's hand, 1 = a trained illustrator's. */
+  style?: number
   count: number
   controls: Controls
   mood: Mood
@@ -111,11 +114,20 @@ export interface SheetStats {
 export interface SheetResult {
   characters: Genome[]
   stats: SheetStats
+  /** The hand this sheet was drawn with. */
+  hand: StyleProfile
 }
 
 /**
  * Generate a whole sheet. Deterministic in `seed` + controls + generation.
  */
+/** A stable 0..1 from a string, for sheet-level constants. */
+function hash01(seed: string): number {
+  let h = 2166136261
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619)
+  return ((h >>> 0) % 100000) / 100000
+}
+
 export function generateSheet(o: SheetOptions): SheetResult {
   const words = new WordBag()
   // Calibrated against the feature vector's dimensionality. Adding silhouette
@@ -125,6 +137,10 @@ export function generateSheet(o: SheetOptions): SheetResult {
   // At this value roughly 4% of a 256-sheet trips it, which is about the rate
   // at which two characters genuinely read as the same person.
   const threshold = o.cloneThreshold ?? 0.92
+  // One key light for the whole sheet. Derived from the seed so it varies
+  // between sheets and stays constant within one — a single artist does not
+  // move the lamp between drawings.
+  const lightAngle = -Math.PI * 0.72 + (hash01(o.seed) - 0.5) * 0.5
   const vectors: number[][] = []
   const characters: Genome[] = []
 
@@ -189,7 +205,7 @@ export function generateSheet(o: SheetOptions): SheetResult {
     }
 
     vectors.push(vec)
-    const g = express(dna, { mood: o.mood, words })
+    const g = express(dna, { mood: o.mood, words, lightAngle })
     characters.push(g)
 
     stats.archetypes[g.archetypeName] = (stats.archetypes[g.archetypeName] ?? 0) + 1
@@ -200,7 +216,7 @@ export function generateSheet(o: SheetOptions): SheetResult {
 
   stats.memorableShare = o.count > 0 ? quirkedSoFar / o.count : 0
   stats.ageMean = o.count > 0 ? stats.ageMean / o.count : 0
-  return { characters, stats }
+  return { characters, stats, hand: styleAt(o.style ?? 0.85) }
 }
 
 /**

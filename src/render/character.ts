@@ -9,10 +9,11 @@
 
 import { Rng } from '../core/rng'
 import { Noise } from '../core/noise'
-import { adjust, shade, tint, clamp, hsl, type Hsl } from '../core/color'
+import { adjust, shade, tint, clamp, hsl, type Hsl, ground } from '../core/color'
 import { ART, type Genome } from '../core/genome'
 import { Pencil, applyGrain, makePaper } from './pencil'
-import { blob, quad, arc, inset, tracePath, type Pt } from './shapes'
+import { STYLES, type StyleProfile } from '../core/style'
+import { blob, quad, arc, inset, tracePath, centroid, type Pt } from './shapes'
 import { drawHairBack, drawHairFront } from './features/hair'
 import { drawFace, drawEars } from './features/face'
 import { drawGarment } from './features/garment'
@@ -22,6 +23,14 @@ import { drawCaption } from './caption'
 export interface Scene {
   p: Pencil
   g: Genome
+  /**
+   * The head's actual centre after the turn has deformed and displaced it.
+   *
+   * Hair masses are derived from the head outline and scaled about a centre;
+   * scaling them about the nominal `build.cx` while the skull itself had moved
+   * slid every hairstyle sideways off its own head.
+   */
+  headCentre: Pt
   /** The sheet's paper tone — the colour an opaque form is blocked in with. */
   paper: Hsl
   /** Head silhouette, the region most features are clipped or anchored to. */
@@ -122,8 +131,19 @@ export function headOutline(g: Genome, noise: Noise): Pt[] {
     const lean = 1 + b.headAsym * ct
     const wob = 1 + noise.at(Math.cos(t) * 2.2 + 13, Math.sin(t) * 2.2 + 7) * 0.028
 
+    // The turn deforms the skull itself. Previously it only shifted the
+    // features a few pixels across a silhouette that stayed perfectly
+    // symmetrical, which is why every one of 256 heads read as the same
+    // frontal oval before any trait registered. The near side bulges past the
+    // eye line, the far side compresses, and the whole mass shifts opposite
+    // the turn — which is what actually says "three-quarter view".
+    const near = ct * Math.sign(b.turn || 1)
+    const squash = 1 - Math.abs(b.turn) * 0.16 * Math.max(0, -near)
+    const bulge = 1 + Math.abs(b.turn) * 0.09 * Math.max(0, near)
+    const shift = -b.turn * b.headRx * 0.05
+
     out.push({
-      x: b.cx + b.headRx * w * wx * lean * wob,
+      x: b.cx + shift + b.headRx * w * wx * lean * wob * squash * bulge,
       y: b.cy + b.headRy * hy * wob,
     })
   }
@@ -309,7 +329,7 @@ function drawNeck(s: Scene): void {
   const { p, g } = s
   const pal = g.palette
   const neck = neckOutline(g)
-  p.base(neck, tint(pal.skin, 1.7), 0.97)
+  p.base(neck, ground(pal.skin), 0.97)
 
   p.hatch(neck, {
     color: pal.skin,
@@ -354,7 +374,7 @@ function drawHead(s: Scene): void {
   // 0. A pale ground in the skin's own hue. This both stops the hair and the
   //    wash showing through the face and gives the hatching something warmer
   //    than bare paper to sit on.
-  p.base(head, tint(pal.skin, 1.7), 0.97)
+  p.base(head, ground(pal.skin), 0.97)
 
   // 1. Local colour. Two layers at a shallow angle difference give the paper
   //    something to hold without reading as texture in its own right.
@@ -416,10 +436,11 @@ function drawHead(s: Scene): void {
   })
 
   // 5. Outline, heaviest where the form turns away.
+  // The one mark in the drawing allowed to be this heavy.
   p.contour(head, {
-    color: adjust(pal.ink, 6, -4),
-    alpha: 0.2,
-    width: 1.55,
+    color: pal.contourInk,
+    alpha: 0.24,
+    width: 1.8,
     passes: 2,
     wobble: 0.6,
     heavyAngle: Math.atan2(-s.ly, -s.lx),
@@ -431,6 +452,8 @@ function drawHead(s: Scene): void {
 /* ---------------------------------------------------------------- entrypoint */
 
 export interface DrawOptions {
+  /** Whose hand is drawing. Defaults to the trained end. */
+  style?: StyleProfile
   /** 0.5 for sheet thumbnails, 1.0-1.4 for inspector and export. */
   detail?: number
   /** Draw the one-word caption below the figure. */
@@ -451,8 +474,9 @@ export function drawCharacter(
   const rng = new Rng(`${g.seed}::draw::${g.index}`)
   const noise = new Noise(rng.fork('noise'))
   const p = new Pencil(ctx, rng, noise, detail)
-  // The three knobs that make one artist's sheet look like a sheet rather than
-  // like one drawing repeated.
+  p.useStyle(o.style ?? STYLES.adult)
+  // The per-character knobs that make one artist's sheet look like a sheet
+  // rather than like one drawing repeated.
   p.gain *= g.build.pressure
   p.wobbleScale = g.build.lineWobble
   p.angleBias = g.build.hatchAngle
@@ -467,6 +491,7 @@ export function drawCharacter(
 
   const s: Scene = {
     p, g, head, torso, lx, ly,
+    headCentre: centroid(head),
     paper: o.paperTone ?? hsl(42, 32, 96),
     headShade: ellipsoidShade(g.build.cx, g.build.cy - g.build.headRy * 0.08, g.build.headRx, g.build.headRy, lx, ly),
   }
@@ -488,14 +513,21 @@ export function drawCharacter(
   drawWash(s)
   drawExtrasBehind(s)
   drawNeck(s)
+  // Mark budget: the face carries the drawing. Left flat, the coat's pattern,
+  // pocket, buttons, patches and folds add up to more discrete marks than the
+  // head has, and the eye goes to the shirt.
+  p.density = 1 - (o.style ?? STYLES.adult).hierarchy * 0.42
   drawGarment(s)
+  p.density = 1
   drawHairBack(s)
   // Ears go under the head so the skull overlaps them, which is what stops the
   // join reading as two shapes butted together.
   drawEars(s)
   drawHead(s)
   drawFace(s)
+  p.density = 1 - (o.style ?? STYLES.adult).hierarchy * 0.2
   drawHairFront(s)
+  p.density = 1
   drawExtrasFront(s)
   drawQuirk(s)
 
@@ -505,7 +537,10 @@ export function drawCharacter(
 
   // A final tooth pass over the finished cell. Every render path lays paper
   // down first, so the canvas is opaque here and `multiply` behaves.
-  applyGrain(ctx, ART.w, ART.h, 0.5, g.index)
+  // Light touch. At 0.5 the tooth pulled even untouched paper down to ~233,
+  // so the drawing had no whites anywhere — and a picture with no white and no
+  // black lives in a mid-grey band and reads as a child's.
+  applyGrain(ctx, ART.w, ART.h, 0.28, g.index)
 }
 
 /** Convenience wrapper used by exports and the inspector. */

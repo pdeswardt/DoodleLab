@@ -7,7 +7,7 @@
  * is used only for the deepest shadow, where direction stops being legible.
  */
 
-import { adjust, shade, tint, clamp } from '../../core/color'
+import { adjust, shade, tint, clamp, ground } from '../../core/color'
 import type { Genome, HairSpec } from '../../core/genome'
 import type { Scene } from '../character'
 import { ellipsoidShade } from '../character'
@@ -76,7 +76,7 @@ function fillMass(
   const count = Math.max(6, Math.round(o.count * clamp(p.detail, 0.45, 1.3)))
   const form = ellipsoidShade(b.cx, b.cy, b.w * 0.55, b.h * 0.55, lightX, lightY, 1.3)
 
-  p.base(region, tint(pal.hair, 1.55), 0.94)
+  p.base(region, ground(pal.hair, 0.9), 0.94)
 
   // Blocked in outside the clip: `hatch` shapes itself to the region, so
   // wrapping it in a mask as well would cost twice for nothing.
@@ -190,17 +190,18 @@ function backRegion(s: Scene): Pt[] {
   // Derived from the head's own outline rather than from a fresh ellipse. Now
   // that skulls are genuinely different shapes, an independent blob reads as a
   // separate object sitting behind the face instead of as hair on a head.
+  const hc = s.headCentre
   return s.head.map((pt, i) => {
     const t = i / s.head.length
-    const height = (pt.y - b.cy) / b.headRy
+    const height = (pt.y - hc.y) / b.headRy
     const below = clamp(height, 0, 1)
     // Growth fades to nothing at the chin. Hair that widens uniformly around
     // the whole skull reads as a hood with a face cut out of it.
     const chinFade = clamp(1 - below ** 1.4, 0, 1)
     const lump = 1 + h.curl * 0.07 * p.noise.at(Math.cos(t * 6.28) * 3, Math.sin(t * 6.28) * 3)
     return {
-      x: b.cx + (pt.x - b.cx) * (1 + (grow - 1) * chinFade) * lump,
-      y: b.cy + (pt.y - b.cy) * (1 + h.back * 0.06 * chinFade) * lump + below * drop,
+      x: hc.x + (pt.x - hc.x) * (1 + (grow - 1) * chinFade) * lump,
+      y: hc.y + (pt.y - hc.y) * (1 + h.back * 0.06 * chinFade) * lump + below * drop,
     }
   })
 }
@@ -216,11 +217,12 @@ function capRegion(s: Scene): Pt[] {
   const kept = s.head.filter((pt) => pt.y <= cut)
   if (kept.length < 4) return []
 
+  const hc = s.headCentre
   const swollen = kept.map((pt) => {
-    const up = clamp((b.cy - pt.y) / b.headRy, 0, 1)
+    const up = clamp((hc.y - pt.y) / b.headRy, 0, 1)
     const lump = 1 + h.curl * 0.09 * p.noise.at(pt.x * 0.09, pt.y * 0.09)
     const f = (1 + puff * up ** 0.75) * lump
-    return { x: b.cx + (pt.x - b.cx) * f, y: b.cy + (pt.y - b.cy) * f }
+    return { x: hc.x + (pt.x - hc.x) * f, y: hc.y + (pt.y - hc.y) * f }
   })
 
   // Close along the hairline. A straight line here is the single fastest way to
@@ -269,7 +271,7 @@ export function drawHairBack(s: Scene): void {
 
   drawTail(s)
   drawBraids(s)
-  if (h.bun === 'back') drawBun(s, { x: g.build.cx, y: g.build.cy + g.build.headRy * 0.1 }, g.build.headRx * 0.4)
+  if (h.bun === 'back') drawBun(s, { x: s.headCentre.x, y: s.headCentre.y + g.build.headRy * 0.1 }, g.build.headRx * 0.4)
 }
 
 export function drawHairFront(s: Scene): void {
@@ -309,10 +311,10 @@ export function drawHairFront(s: Scene): void {
   if (h.bun === 'top' || h.bun === 'double') {
     const r = g.build.headRx * (0.3 + h.crown * 0.16)
     if (h.bun === 'double') {
-      drawBun(s, { x: g.build.cx - g.build.headRx * 0.6, y: g.build.cy - g.build.headRy * 0.92 }, r * 0.8)
-      drawBun(s, { x: g.build.cx + g.build.headRx * 0.6, y: g.build.cy - g.build.headRy * 0.92 }, r * 0.8)
+      drawBun(s, { x: s.headCentre.x - g.build.headRx * 0.6, y: s.headCentre.y - g.build.headRy * 0.92 }, r * 0.8)
+      drawBun(s, { x: s.headCentre.x + g.build.headRx * 0.6, y: s.headCentre.y - g.build.headRy * 0.92 }, r * 0.8)
     } else {
-      drawBun(s, { x: g.build.cx + h.part * 10, y: g.build.cy - g.build.headRy * (1.06 + h.crown * 0.35) }, r)
+      drawBun(s, { x: s.headCentre.x + h.part * 10, y: s.headCentre.y - g.build.headRy * (1.06 + h.crown * 0.35) }, r)
     }
   }
 }
@@ -344,43 +346,57 @@ function drawTail(s: Scene): void {
   const h = g.hair
   if (h.tail === 'none') return
   const b = g.build
+  const hc = s.headCentre
   const side = h.part >= 0 ? 1 : -1
 
   const tails: { x: number; y: number; dir: number; len: number }[] = []
   if (h.tail === 'twin') {
-    tails.push({ x: b.cx - b.headRx * 0.92, y: b.cy - b.headRy * 0.1, dir: Math.PI * 0.78, len: b.headRy * 1.05 })
-    tails.push({ x: b.cx + b.headRx * 0.92, y: b.cy - b.headRy * 0.1, dir: Math.PI * 0.22, len: b.headRy * 1.05 })
+    tails.push({ x: hc.x - b.headRx * 0.82, y: hc.y - b.headRy * 0.1, dir: Math.PI * 0.82, len: b.headRy * 1 })
+    tails.push({ x: hc.x + b.headRx * 0.82, y: hc.y - b.headRy * 0.1, dir: Math.PI * 0.18, len: b.headRy * 1 })
   } else {
-    const y = h.tail === 'high' ? b.cy - b.headRy * 0.7 : b.cy + b.headRy * 0.25
-    tails.push({ x: b.cx + side * b.headRx * 0.75, y, dir: side > 0 ? 0.45 : Math.PI - 0.45, len: b.headRy * 1.5 })
+    const y = h.tail === 'high' ? hc.y - b.headRy * 0.6 : hc.y + b.headRy * 0.2
+    tails.push({ x: hc.x + side * b.headRx * 0.7, y, dir: side > 0 ? 0.5 : Math.PI - 0.5, len: b.headRy * 1.3 })
   }
 
   for (const [i, t] of tails.entries()) {
-    const tipX = t.x + Math.cos(t.dir) * t.len
-    const tipY = t.y + Math.sin(t.dir) * t.len
-    const mid = { x: (t.x + tipX) / 2, y: (t.y + tipY) / 2 }
-    const region = blob(mid.x, mid.y, t.len * 0.34, t.len * 0.52, p.noise, {
-      wobble: 0.1 + h.curl * 0.1,
-      lumps: 3,
-      lane: 23 + i,
-      steps: 32,
-      shape: (a) => 1 + 0.25 * Math.sin(a),
-    })
+    // A tail is a tapered sweep that starts *on the skull* and travels out.
+    // Built as a blob centred on its own midpoint it had no join at all — a
+    // mass of hair floating in the air beside the head.
+    const dx = Math.cos(t.dir)
+    const dy = Math.sin(t.dir)
+    const nx = -dy
+    const ny = dx
+    const steps = 8
+    const upper: Pt[] = []
+    const lower: Pt[] = []
+    for (let k = 0; k <= steps; k++) {
+      const u = k / steps
+      // Narrow at the tie, full through the body, tapering to the tip.
+      const width = b.headRx * (0.16 + Math.sin(u * Math.PI * 0.85) * 0.30) * (1 - u * 0.35)
+      // Gravity: the tail droops as it goes.
+      const sag = u * u * b.headRy * 0.3
+      const cx2 = t.x + dx * t.len * u
+      const cy2 = t.y + dy * t.len * u + sag
+      const wob = p.noise.at1(u * 3 + i * 7, 4) * b.headRx * 0.05
+      upper.push({ x: cx2 + nx * width + wob, y: cy2 + ny * width })
+      lower.push({ x: cx2 - nx * width + wob, y: cy2 - ny * width })
+    }
+    const region = [...upper, ...lower.reverse()]
+
     fillMass(p, g, region, {
       whorl: { x: t.x, y: t.y },
-      from: t.dir - 0.5,
-      to: t.dir + 0.5,
-      count: 14,
-      len: t.len * 1.2,
+      from: t.dir - 0.35,
+      to: t.dir + 0.35,
+      count: 16,
+      len: t.len * 1.15,
       curl: h.curl * 0.8,
-      bend: 0.3,
+      bend: 0.25,
       lane: 360 + i * 40,
       sheen: 0.18,
     }, s.lx, s.ly)
 
-    // The tie.
-    const tie = arc(t.x, t.y, 6, 4, 0, Math.PI * 2, 10)
-    p.stroke(tie, {
+    // The tie, sitting where the tail meets the head.
+    p.stroke(arc(t.x, t.y, 6, 4.5, 0, Math.PI * 2, 10), {
       color: g.palette.accent,
       alpha: 0.3,
       width: 2,
@@ -398,8 +414,8 @@ function drawBraids(s: Scene): void {
   const b = g.build
   for (let k = 0; k < n; k++) {
     const side = k % 2 === 0 ? -1 : 1
-    const x0 = b.cx + side * b.headRx * 0.86
-    const y0 = b.cy + b.headRy * 0.18
+    const x0 = s.headCentre.x + side * b.headRx * 0.86
+    const y0 = s.headCentre.y + b.headRy * 0.18
     const len = b.headRy * (0.9 + g.hair.sides * 0.5)
     const knots = 4
     for (let i = 0; i < knots; i++) {
@@ -433,10 +449,10 @@ function drawMohawk(s: Scene): void {
   // outline filled in reads as a brush head, not as hair standing up.
   for (let i = 0; i < spikes; i++) {
     const t = spikes > 1 ? i / (spikes - 1) : 0.5
-    const x = b.cx - halfW + t * halfW * 2
+    const x = s.headCentre.x - halfW + t * halfW * 2
     const lean = (t - 0.5) * b.headRx * 0.22
     const tall = height * (0.55 + 0.55 * Math.sin(t * Math.PI)) * p.rng.range(0.85, 1.15)
-    const base = b.cy - b.headRy * 0.72
+    const base = s.headCentre.y - b.headRy * 0.72
     const wide = halfW * 0.34
     const spike: Pt[] = [
       { x: x - wide, y: base },
@@ -469,7 +485,7 @@ function drawSideLocks(s: Scene): void {
   const b = g.build
   const cut = hairlineY(g)
   for (const side of [-1, 1] as const) {
-    const topX = b.cx + side * b.headRx * 1.0
+    const topX = s.headCentre.x + side * b.headRx * 1.0
     // Locks hang beside the face, not across it.
     const drop = b.headRy * Math.min(h.sides, 1.05) * 0.85
     // A soft mass, not a cut-out flap: angular side locks were reading as
@@ -503,8 +519,8 @@ function drawTufts(s: Scene): void {
   const rng = p.rng
   for (let i = 0; i < n; i++) {
     const a = -Math.PI * 0.92 + rng.next() * Math.PI * 0.84
-    const ox = b.cx + Math.cos(a) * b.headRx * (0.9 + h.crown * 0.3)
-    const oy = b.cy + Math.sin(a) * b.headRy * (0.9 + h.crown * 0.3)
+    const ox = s.headCentre.x + Math.cos(a) * b.headRx * (0.9 + h.crown * 0.3)
+    const oy = s.headCentre.y + Math.sin(a) * b.headRy * (0.9 + h.crown * 0.3)
     const pts = strandPath(
       ox, oy, a + rng.gauss(0, 0.3), h.tuftLen * rng.range(0.45, 0.85),
       h.curl * 1.2, rng.gauss(0, 0.4), rng.next() * 6.28, 9,

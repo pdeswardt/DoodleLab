@@ -21,6 +21,7 @@ import type { Genome } from './core/types'
 import { ART } from './core/types'
 import { drawCharacter } from './render/character'
 import { makePaper } from './render/pencil'
+import { styleAt, type StyleProfile } from './core/style'
 import { SheetView } from './ui/sheet'
 import { exportCharacter, exportSheet } from './ui/exporter'
 
@@ -28,6 +29,9 @@ import { exportCharacter, exportSheet } from './ui/exporter'
 
 interface State {
   seed: string
+  /** 0 = a child's hand, 1 = a trained illustrator's. */
+  style: number
+  hand: StyleProfile
   cols: number
   detail: number
   controls: Controls
@@ -40,6 +44,8 @@ interface State {
 
 const state: State = {
   seed: randomSeed(),
+  style: 0.85,
+  hand: styleAt(0.85),
   cols: 16,
   detail: 0.58,
   controls: { ...DEFAULT_CONTROLS },
@@ -60,6 +66,7 @@ const seedInput = $<HTMLInputElement>('#seed')
 const moodSelect = $<HTMLSelectElement>('#mood')
 const gridSelect = $<HTMLSelectElement>('#grid')
 const qualitySelect = $<HTMLSelectElement>('#quality')
+const styleSelect = $<HTMLSelectElement>('#style')
 const zoomInput = $<HTMLInputElement>('#zoom')
 const progressEl = $<HTMLElement>('#progress')
 const progressBar = $<HTMLElement>('.progress-bar span')
@@ -110,13 +117,15 @@ function draw(): void {
     controls: state.controls,
     mood: state.mood,
     locks: state.locks,
+    style: state.style,
   })
+  state.hand = result.hand
   state.characters = result.characters
   state.stats = result.stats
   rerollCounts.clear()
 
   sheet.setPaper(state.mood.paper, state.seed)
-  sheet.render(state.characters, state.cols, state.detail, Number(zoomInput.value))
+  sheet.render(state.characters, state.cols, state.detail, Number(zoomInput.value), state.hand)
   renderStats(result.stats, performance.now() - t0)
 }
 
@@ -164,7 +173,7 @@ function paintInspector(g: Genome): void {
       0, 0,
     )
     ctx.scale(scale, scale)
-    drawCharacter(ctx, g, { detail: 1.15, caption: true, paperTone: state.mood.paper })
+    drawCharacter(ctx, g, { detail: 1.15, caption: true, paperTone: state.mood.paper, style: state.hand })
     ctx.setTransform(1, 0, 0, 1, 0, 0)
   }
 
@@ -295,6 +304,12 @@ function bindBar(): void {
     draw()
   })
 
+  styleSelect.addEventListener('change', () => {
+    state.style = Number(styleSelect.value)
+    state.hand = styleAt(state.style)
+    draw()
+  })
+
   zoomInput.addEventListener('input', () => sheet.setZoom(Number(zoomInput.value)))
 
   $('#draw').addEventListener('click', () => draw())
@@ -313,6 +328,7 @@ function bindBar(): void {
         cols: state.cols,
         seed: state.seed,
         paperTone: state.mood.paper,
+        style: state.hand,
         scale: 1,
         onProgress: (done, total) => { progressBar.style.width = `${(done / total) * 100}%` },
       })
@@ -338,7 +354,7 @@ function bindInspector(): void {
   $('#download-one').addEventListener('click', () => {
     const g = state.selected !== null ? state.characters[state.selected] : null
     if (g) {
-      exportCharacter(g, state.mood.paper)
+      exportCharacter(g, state.mood.paper, 900, state.hand)
       toast('Portrait saved')
     }
   })

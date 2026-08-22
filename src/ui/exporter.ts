@@ -10,6 +10,7 @@ import { ART, type Genome } from '../core/genome'
 import { drawCharacter } from '../render/character'
 import { makePaper } from '../render/pencil'
 import type { Hsl } from '../core/color'
+import { STYLES, type StyleProfile } from '../core/style'
 
 function save(canvas: HTMLCanvasElement, filename: string): void {
   canvas.toBlob((blob) => {
@@ -31,6 +32,7 @@ export interface SheetExportOptions {
   /** 1 gives 240x300 per character; 2 doubles it. */
   scale?: number
   detail?: number
+  style?: StyleProfile
   onProgress?: (done: number, total: number) => void
 }
 
@@ -60,7 +62,7 @@ export async function exportSheet(o: SheetExportOptions): Promise<void> {
     ctx.save()
     ctx.translate(pad + col * cellW, pad + row * cellH)
     ctx.scale(scale, scale)
-    drawCharacter(ctx, g, { detail: o.detail ?? 0.85, caption: true, paperTone: o.paperTone })
+    drawCharacter(ctx, g, { detail: o.detail ?? 0.85, caption: true, paperTone: o.paperTone, style: o.style })
     ctx.restore()
 
     if (col === o.cols - 1) {
@@ -74,7 +76,9 @@ export async function exportSheet(o: SheetExportOptions): Promise<void> {
 }
 
 /** One character at print size, on its own sheet of paper. */
-export function exportCharacter(g: Genome, paperTone: Hsl, width = 900): void {
+export function exportCharacter(
+  g: Genome, paperTone: Hsl, width = 900, style: StyleProfile = STYLES.adult,
+): void {
   const scale = width / ART.w
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(ART.w * scale)
@@ -84,7 +88,7 @@ export function exportCharacter(g: Genome, paperTone: Hsl, width = 900): void {
   ctx.drawImage(makePaper(canvas.width, canvas.height, paperTone, `${g.seed}-${g.index}`), 0, 0)
   ctx.save()
   ctx.scale(scale, scale)
-  drawCharacter(ctx, g, { detail: 1.25, caption: true, paperTone: paperTone })
+  drawCharacter(ctx, g, { detail: 1.25, caption: true, paperTone: paperTone, style })
   ctx.restore()
   save(canvas, `pencilfolk-${g.word.toLowerCase()}-${g.dna.fingerprint.slice(0, 8)}.png`)
 }

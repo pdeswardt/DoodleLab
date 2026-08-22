@@ -11,6 +11,7 @@ import { ART, type Genome } from '../core/genome'
 import { drawCharacter } from '../render/character'
 import { makePaper } from '../render/pencil'
 import { hsl, type Hsl } from '../core/color'
+import { STYLES, type StyleProfile } from '../core/style'
 
 /** Device-pixel size of one thumbnail. Big enough to stay crisp when zoomed. */
 const CELL_W = 208
@@ -45,6 +46,7 @@ export class SheetView {
   private paper: Hsl = hsl(42, 32, 96)
   /** One paper tile, reused by every cell at a per-cell offset. */
   private paperTile: HTMLCanvasElement | null = null
+  private hand: StyleProfile = STYLES.adult
 
   constructor(el: HTMLElement, cb: SheetCallbacks) {
     this.el = el
@@ -72,8 +74,12 @@ export class SheetView {
   private cols = 16
 
   /** Rebuild the grid and start drawing into it. */
-  render(characters: Genome[], cols: number, detail: number, zoom: number): void {
+  render(
+    characters: Genome[], cols: number, detail: number, zoom: number,
+    hand: StyleProfile = STYLES.adult,
+  ): void {
     this.cancel()
+    this.hand = hand
     this.characters = characters
     this.cols = cols
     this.detail = detail
@@ -141,7 +147,7 @@ export class SheetView {
     }
     ctx.save()
     ctx.scale(CELL_W / ART.w, CELL_H / ART.h)
-    drawCharacter(ctx, g, { detail: this.detail, caption: true, paperTone: this.paper })
+    drawCharacter(ctx, g, { detail: this.detail, caption: true, paperTone: this.paper, style: this.hand })
     ctx.restore()
     canvas.parentElement?.classList.remove('pending')
   }

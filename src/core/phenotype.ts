@@ -44,9 +44,16 @@ function expressPalette(dna: CharacterDNA): Palette {
     accent: toHsl(p.accent),
     wash: toHsl(p.wash),
     washAlt: toHsl(p.washAlt),
-    // One decision that does more for "coloured pencil" than any texture trick:
-    // outlines are a deep cousin of the local colour, never black.
-    ink: adjust(mix(skin, garment, 0.4), -46, 4),
+    // The ink family. Outlines stay cousins of the local colour rather than
+    // going black — but there are now several of them, pitched at different
+    // depths, because a single ink drawing every edge is what made the coat
+    // pocket read as loudly as the eye.
+    keyline: hsl(mix(skin, garment, 0.5).h + 8, 26, 13),
+    contourInk: adjust(mix(skin, garment, 0.4), -52, 10),
+    lip: hsl(skin.h - 14, 54, 38),
+    // The chroma peak of the whole picture, and deliberately its own hue.
+    noseAccent: hsl(skin.h - 6, Math.min(78, skin.s + 40), Math.max(46, skin.l - 4)),
+    ink: adjust(mix(skin, garment, 0.4), -40, 2),
     grime: toHsl(p.grime),
   }
 }
@@ -268,6 +275,14 @@ function choosePool(dna: CharacterDNA, face: Face, quirks: AppliedQuirk[], rng: 
 export interface ExpressOptions {
   mood: Mood
   words: WordBag
+  /**
+   * The sheet's key light, in radians.
+   *
+   * One artist lights a whole set from one direction. Randomising it per
+   * character costs the sheet its cohesion and buys nothing a viewer can name —
+   * they cannot tell you the light moved, only that the page looks incoherent.
+   */
+  lightAngle?: number
 }
 
 /** Turn one genotype into one drawable character. */
@@ -353,7 +368,8 @@ export function express(dna: CharacterDNA, o: ExpressOptions): Genome {
     palette, build, hair, face, garment, extras, condition,
     quirks: dna.quirks,
     wash,
-    lightAngle: -Math.PI * 0.72 + rng.gauss(0, 0.25),
+    // Near-constant across the sheet; the jitter is the hand, not the lamp.
+    lightAngle: (o.lightAngle ?? -Math.PI * 0.72) + rng.gauss(0, 0.05),
     variation: dna.controls.variationStrength,
     memorability: dna.controls.memorability,
     dna,

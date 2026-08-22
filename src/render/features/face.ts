@@ -11,7 +11,7 @@
 import { adjust, shade, tint, hsl, clamp, type Hsl } from '../../core/color'
 import type { BrowStyle, EyeShape, Genome, LidStyle } from '../../core/genome'
 import type { Scene } from '../character'
-import { radialFalloff } from '../character'
+import { radialFalloff, ellipsoidShade } from '../character'
 import type { Pencil } from '../pencil'
 import { type Pt, arc, quad, blob, withClip, normalAt } from '../shapes'
 
@@ -111,14 +111,22 @@ function drawOneEye(
     cy, ry, cover.top, cover.bottom,
   )
 
-  // Sclera: a whisper of tone so the eye is not a hole in the paper.
+  // 1. The sclera is a near-white ball, laid opaque. Hatching it at alpha 0.05
+  //    made it invisible, and an eye with no white in it has nowhere for the
+  //    iris to be dark against — which is why it read as a grey smudge.
+  p.base(region, hsl(pal.skin.h + 12, 10, 94), 0.88)
+
+  // 2. The upper lid casts a shadow across the top of that ball. This is the
+  //    mark that makes an eye read as a sphere in a socket rather than as a
+  //    shape on a surface, and it was absent entirely.
   p.hatch(region, {
-    color: hsl(pal.skin.h + 8, 14, 88),
-    alpha: 0.05,
-    spacing: 2.2,
-    angle: -0.7,
+    color: shade(pal.skin, 1.5),
+    alpha: 0.16,
+    spacing: 1.6,
+    angle: 0.2,
     layers: 1,
-    lane: lane + 10,
+    lane: lane + 8,
+    pressure: (_x, y) => clamp(1 - (y - (cy - ry)) / (ry * 1.25), 0, 1) ** 1.2,
   })
 
   // Iris, offset by gaze and clipped to whatever the lids leave visible.
@@ -126,50 +134,72 @@ function drawOneEye(
   const gy = cy + f.gazeY * r * 0.3
   const ir = r * 0.66
   const irisRegion = arc(gx, gy, ir, ir, 0, Math.PI * 2, 26)
-  // The catchlight sits opposite the light, up and to one side.
   const hlx = gx - ir * 0.42
   const hly = gy - ir * 0.44
-  const hlr = ir * (style === 'sparkle' ? 0.5 : 0.36)
+  const hlr = ir * (style === 'sparkle' ? 0.5 : 0.34)
 
   withClip(p.ctx, [region], () => {
+    // 3. The iris: a hard-edged disc, darker at its rim than at its centre.
     p.hatch(irisRegion, {
       color: iris,
-      alpha: 0.17,
-      spacing: 1.5,
+      alpha: 0.3,
+      spacing: 1.3,
       angle: 1.2,
       layers: 2,
-      layerTurn: 44,
-      curve: 0.8,
+      layerTurn: 52,
+      curve: 0.6,
       lane: lane + 14,
-      // Limbal ring darker, centre lighter, and a clean gap for the catchlight.
       pressure: (x, y) => {
         const d = Math.hypot(x - gx, y - gy) / ir
-        const ring = clamp(0.45 + d * 0.9, 0, 1.4)
         const hl = Math.hypot(x - hlx, y - hly) / hlr
-        return hl < 1 ? 0 : ring
+        return hl < 1 ? 0 : clamp(0.5 + d * 0.85, 0, 1.4)
       },
     })
-    // Pupil.
-    const pr = ir * f.pupil * 0.72
-    p.hatch(arc(gx, gy, pr, pr, 0, Math.PI * 2, 18), {
-      color: shade(iris, 2.6),
-      alpha: 0.3,
-      spacing: 1.2,
-      angle: 0.4,
-      layers: 2,
-      layerTurn: 60,
-      lane: lane + 18,
-      pressure: (x, y) => (Math.hypot(x - hlx, y - hly) / hlr < 1 ? 0 : 1),
+    // The limbal ring — a hard dark edge round the iris. Without it the iris
+    // bleeds into the sclera and the eye loses its focus.
+    p.contour(irisRegion, {
+      color: shade(iris, 2.4), alpha: 0.3, width: 1.3, passes: 1, wobble: 0.25, lane: lane + 20,
     })
-    p.contour(irisRegion, { color: shade(iris, 2), alpha: 0.14, width: 1.1, passes: 1, lane: lane + 22 })
+
+    // 4. The pupil is opaque black. It is one of the two or three marks in the
+    //    whole picture that should be a true dark.
+    const pr = ir * f.pupil * 0.56
+    const pupil = arc(gx, gy, pr, pr, 0, Math.PI * 2, 18)
+    if (pr > 0.6) p.accent(pupil, pal.keyline, 0.8)
+
+    // 5. The catchlight is reserved paper, laid back over the top — a hard,
+    //    round, genuinely white mark.
+    p.base(arc(hlx, hly, hlr * 0.82, hlr * 0.82, 0, Math.PI * 2, 12), hsl(50, 16, 98), 0.95)
   })
 
   // Lid lines. The upper lid is always heavier than the lower — that single
   // asymmetry does more for expression than the eye shape does.
   const upper = arc(cx, cy, rx * 1.04, ry * 1.04, Math.PI + 0.18, Math.PI * 2 - 0.18, 16)
   p.stroke(upper, {
-    color: ink, alpha: 0.26, width: 1.8, passes: 2, wobble: 0.35, taper: 0.35, lane: lane + 26,
+    color: pal.keyline,
+    alpha: 0.3,
+    width: 2,
+    passes: 2,
+    wobble: 0.3,
+    taper: 0.3,
+    // Heaviest toward the outer corner, the way a real lash line is.
+    alphaAt: (t) => 0.55 + (flip > 0 ? t : 1 - t) * 0.75,
+    lane: lane + 26,
   })
+
+  if (p.hand.construction > 0.5) {
+    // The crease above the lid, and the tear duct at the inner corner. Small
+    // marks, but they are the difference between an eye and a circle.
+    p.stroke(
+      arc(cx, cy - ry * 0.35, rx * 0.95, ry * 1.05, Math.PI + 0.42, Math.PI * 2 - 0.42, 12),
+      { color: shade(pal.skin, 1.8), alpha: 0.14, width: 1.2, passes: 1, taper: 0.75, lane: lane + 28 },
+    )
+    p.stroke(
+      [{ x: cx - flip * rx * 1.05, y: cy + ry * 0.1 },
+        { x: cx - flip * rx * 1.3, y: cy + ry * 0.3 }],
+      { color: adjust(pal.lip, 8, -14), alpha: 0.22, width: 1.3, passes: 1, taper: 0.7, lane: lane + 29 },
+    )
+  }
   const lower = arc(cx, cy, rx * 1.02, ry * 1.02, 0.28, Math.PI - 0.28, 12)
   p.stroke(lower, {
     color: ink, alpha: 0.1, width: 1.1, passes: 1, wobble: 0.4, taper: 0.6, lane: lane + 30,
@@ -417,7 +447,8 @@ function drawBrows(s: Scene): void {
         curve: 0.8, lane: lane + 20,
       })
       p.contour(shape, {
-        color: shade(col, 0.8), alpha: 0.13, width: 1.1, passes: 1, wobble: 0.8, lane: lane + 24,
+        color: shade(col, 0.8), alpha: 0.13, width: 1.1, passes: 1, wobble: 0.8,
+        optional: true, lane: lane + 24,
       })
     }
   }
@@ -439,6 +470,8 @@ function drawNose(s: Scene): void {
 
   const bulb = (rx: number, ry: number, oy = 0): Pt[] =>
     blob(cx, cy + oy, rx, ry, p.noise, { wobble: 0.07, lumps: 2, lane: 44, steps: 22 })
+  const bulbAt = (x: number, y: number, rx: number, ry: number): Pt[] =>
+    blob(x, y, rx, ry, p.noise, { wobble: 0.12, lumps: 2, lane: 45, steps: 16 })
 
   switch (f.nose) {
     case 'beak': {
@@ -449,7 +482,7 @@ function drawNose(s: Scene): void {
         { x: cx - w * 0.9, y: cy + h * 0.9 },
       ]
       p.hatch(path, { color: col, alpha: 0.1, spacing: 2, angle: 1, layers: 2, lane: 1100 })
-      p.contour(path, { color: ink, alpha: 0.16, width: 1.3, passes: 1, closed: false, lane: 1104 })
+      p.contour(path, { color: ink, alpha: 0.16, width: 1.3, passes: 1, closed: false, optional: true, lane: 1104 })
       break
     }
     case 'long': {
@@ -458,7 +491,7 @@ function drawNose(s: Scene): void {
       })
       const tip = bulb(w * 0.8, h * 0.8)
       p.hatch(tip, { color: col, alpha: 0.12, spacing: 1.8, angle: 0.8, layers: 2, lane: 1110 })
-      p.contour(tip, { color: ink, alpha: 0.14, width: 1.2, passes: 1, lane: 1112 })
+      p.contour(tip, { color: ink, alpha: 0.14, width: 1.2, passes: 1, optional: true, lane: 1112 })
       break
     }
     case 'upturned': {
@@ -475,30 +508,70 @@ function drawNose(s: Scene): void {
         color: col, alpha: 0.1, spacing: 2, angle: 0.7, layers: 2, lane: 1120,
         pressure: radialFalloff(cx - w * 0.5, cy - h * 0.4, w * 3, 0.8),
       })
-      p.contour(shape, { color: ink, alpha: 0.13, width: 1.2, passes: 1, lane: 1122 })
+      p.contour(shape, { color: ink, alpha: 0.13, width: 1.2, passes: 1, optional: true, lane: 1122 })
       break
     }
     default: {
-      // Button / blob — the reference nose: a small warm ball with the light
-      // left as bare paper on its upper left.
+      // The reference's nose is a lit ball in a *different, more saturated
+      // hue* than the surrounding skin — the chroma peak of the whole picture —
+      // with a bare-paper light plane, a crescent core shadow, a soft cast
+      // shadow onto the philtrum, and no outline anywhere on it. It was an
+      // evenly smudged disc inside a ring.
       const rx = f.nose === 'blob' ? w * 1.45 : w * 1.15
       const ry = f.nose === 'blob' ? h * 1.25 : h
       const shape = bulb(rx, ry)
+      const lit = ellipsoidShade(cx, cy, rx, ry, s.lx, s.ly, 1.3)
+
+      // Local colour, kept off the light plane.
       p.hatch(shape, {
-        color: col,
-        alpha: 0.14,
-        spacing: 1.8,
+        color: g.palette.noseAccent,
+        alpha: 0.17,
+        spacing: 1.6,
         angle: 0.75,
         layers: 2,
-        layerTurn: 40,
+        layerTurn: 44,
         lane: 1124,
-        pressure: (x, y) => {
-          const d = Math.hypot((x - (cx - rx * 0.35)) / rx, (y - (cy - ry * 0.4)) / ry)
-          return clamp(d * 0.85, 0, 1)
-        },
+        pressure: (x, y) => clamp(0.25 + lit(x, y) * 1.1, 0, 1),
       })
+      // The core shadow: a crescent inside the form, not a rim.
+      p.hatch(shape, {
+        color: shade(g.palette.noseAccent, 1.6),
+        alpha: 0.16,
+        spacing: 1.8,
+        angle: 1.3,
+        layers: 1,
+        lane: 1125,
+        pressure: (x, y) => clamp((lit(x, y) - 0.45) * 2.2, 0, 1),
+      })
+      // The bridge: two soft planes running up to the brow, no line.
+      if (p.hand.construction > 0.5) {
+        p.hatch(
+          [{ x: cx - rx * 0.75, y: cy - ry * 0.4 }, { x: cx + rx * 0.75, y: cy - ry * 0.4 },
+            { x: cx + rx * 0.42, y: cy - ry * 3.2 }, { x: cx - rx * 0.42, y: cy - ry * 3.2 }],
+          {
+            color: shade(g.palette.skin, 1.1),
+            alpha: 0.07,
+            spacing: 2.4,
+            angle: 1.5,
+            layers: 1,
+            gaps: 0.4,
+            lane: 1127,
+            pressure: (x) => clamp((x - cx) / (rx * 1.5) * s.lx > 0 ? 0.9 : 0.25, 0, 1),
+          },
+        )
+        // Cast shadow onto the philtrum.
+        p.hatch(
+          bulbAt(cx + s.lx * rx * 0.5, cy + ry * 1.15, rx * 0.7, ry * 0.5),
+          {
+            color: shade(g.palette.skin, 1.5), alpha: 0.11, spacing: 1.8, angle: 0.4,
+            layers: 1, gaps: 0.35, lane: 1128,
+          },
+        )
+      }
+      // Outlined only by an untrained hand.
       p.contour(shape, {
-        color: ink, alpha: 0.13, width: 1.2, passes: 1, heavyAngle: Math.PI * 0.55, heavyAmount: 0.5, lane: 1126,
+        color: ink, alpha: 0.13, width: 1.2, passes: 1,
+        heavyAngle: Math.PI * 0.55, heavyAmount: 0.5, optional: true, lane: 1126,
       })
     }
   }
@@ -507,7 +580,9 @@ function drawNose(s: Scene): void {
   if (f.noseSize > 0.92 && f.nose !== 'upturned') {
     for (const side of [-1, 1] as const) {
       p.stroke(arc(cx + side * w * 0.85, cy + h * 0.45, w * 0.28, h * 0.22, 0.4, Math.PI * 1.6, 8), {
-        color: adjust(ink, -6), alpha: 0.2, width: 1.1, passes: 1, lane: 1130 + side,
+        color: shade(g.palette.noseAccent, 2),
+        alpha: p.hand.construction > 0.5 ? 0.24 : 0.2,
+        width: 1.1, passes: 1, lane: 1130 + side,
       })
     }
   }
@@ -522,8 +597,11 @@ function drawMouth(s: Scene): void {
   const cx = b.cx + turnShift(g) * 1.15 + f.gazeX * 1.2
   const cy = f.mouthY
   const w = b.headRx * 0.24 * f.mouthW
-  const ink = adjust(g.palette.ink, 2, 8, -6)
-  const lip = adjust(g.palette.blush, -12, 10)
+  // The mouth line is one of the few marks that should be a real dark, and the
+  // lips are the second chroma accent after the nose.
+  const ink = p.hand.construction > 0.5 ? g.palette.keyline : adjust(g.palette.ink, 2, 8, -6)
+  const lip = g.palette.lip
+  const built = p.hand.construction > 0.5
 
   // A mouth that is level to the pixel reads as a decal. The tilt is part of
   // the character's fixed asymmetry, not per-draw noise.
@@ -589,9 +667,39 @@ function drawMouth(s: Scene): void {
       line(quad({ x: cx - w * 0.9, y: cy - 1 }, { x: cx, y: cy + w * 0.5 }, { x: cx + w * 0.9, y: cy - 1 }, 14))
   }
 
+  if (built) {
+    // Lip volume: the upper lip turns away from the light and sits in shadow,
+    // the lower lip catches it. Drawing the mouth as a single arc — which is
+    // what it was — is the schematic a child uses.
+    const upperLip: Pt[] = [
+      ...tip(quad({ x: cx - w * 0.95, y: cy }, { x: cx, y: cy - w * 0.34 }, { x: cx + w * 0.95, y: cy }, 12)),
+      ...tip(quad({ x: cx + w * 0.95, y: cy }, { x: cx, y: cy + w * 0.06 }, { x: cx - w * 0.95, y: cy }, 8)).slice(1, -1),
+    ]
+    p.hatch(upperLip, {
+      color: shade(lip, 1.2), alpha: 0.15, spacing: 1.6, angle: 1.2, layers: 1, lane: 1232,
+    })
+    const lowerLip: Pt[] = [
+      ...tip(quad({ x: cx - w * 0.8, y: cy + w * 0.06 }, { x: cx, y: cy + w * 0.1 }, { x: cx + w * 0.8, y: cy + w * 0.06 }, 10)),
+      ...tip(quad({ x: cx + w * 0.8, y: cy + w * 0.06 }, { x: cx, y: cy + w * 0.46 }, { x: cx - w * 0.8, y: cy + w * 0.06 }, 10)).slice(1, -1),
+    ]
+    p.hatch(lowerLip, {
+      color: tint(lip, 0.5), alpha: 0.11, spacing: 1.8, angle: 0.6, layers: 1, lane: 1234,
+      // Left lighter where the light lands on the roll of the lip.
+      pressure: (_x, y) => clamp((y - cy) / (w * 0.4), 0, 1),
+    })
+    // The corners are the darkest part of a mouth, and they anchor it.
+    for (const side of [-1, 1] as const) {
+      p.stroke(
+        [{ x: cx + side * w * 0.72, y: cy + side * tilt * w * 0.7 },
+          { x: cx + side * w * 0.98, y: cy + side * tilt * w * 0.95 + 1 }],
+        { color: ink, alpha: 0.3, width: 1.6, passes: 1, taper: 0.5, lane: 1236 + side },
+      )
+    }
+  }
+
   // A hint of shadow beneath the lower lip grounds the mouth on the face.
-  p.stroke(arc(cx, cy + w * 0.55, w * 0.5, w * 0.2, Math.PI * 0.15, Math.PI * 0.85, 8), {
-    color: shade(g.palette.skin, 1.1), alpha: 0.08, width: 2, passes: 1, taper: 0.8, lane: 1230,
+  p.stroke(arc(cx, cy + w * 0.62, w * 0.5, w * 0.2, Math.PI * 0.15, Math.PI * 0.85, 8), {
+    color: shade(g.palette.skin, 1.3), alpha: 0.1, width: 2, passes: 1, taper: 0.8, lane: 1230,
   })
 }
 
@@ -622,7 +730,7 @@ export function drawEars(s: Scene): void {
       color: shade(g.palette.skin, 1.2), alpha: 0.1, spacing: 2.4, angle: 0.8, layers: 1, lane: 1304 + side * 10,
       pressure: radialFalloff(cx + side * rx * 0.2, cy + ry * 0.3, rx * 2, 1.2),
     })
-    p.contour(region, { color: g.palette.ink, alpha: 0.11, width: 1.1, passes: 1, lane: 1308 + side * 10 })
+    p.contour(region, { color: g.palette.ink, alpha: 0.11, width: 1.1, passes: 1, optional: true, lane: 1308 + side * 10 })
     // Inner fold.
     p.stroke(arc(cx + side * rx * 0.1, cy, rx * 0.45, ry * 0.5, Math.PI * 0.6, Math.PI * 1.7, 10), {
       color: shade(g.palette.skin, 1.4), alpha: 0.14, width: 1.1, passes: 1, taper: 0.6, lane: 1312 + side * 10,

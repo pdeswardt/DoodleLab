@@ -88,7 +88,24 @@ export interface Palette {
   accent: Hsl
   wash: Hsl
   washAlt: Hsl
-  /** Outline colour. Never black — a deep, desaturated cousin of the local hue. */
+  /**
+   * The ink family.
+   *
+   * One outline colour for the whole drawing is the mud that made everything
+   * read as equally important. A trained hand uses several, and the difference
+   * between them *is* the hierarchy: a near-black keyline on the two or three
+   * marks that must land hardest, a warm dark for the silhouette, a saturated
+   * hairline for the mouth, and a soft one for everything meant to recede.
+   */
+  /** Near-black, slightly cool. Pupils, glasses, the deepest hair core. Use sparingly. */
+  keyline: Hsl
+  /** Warm dark of the local colour — the head silhouette and other real edges. */
+  contourInk: Hsl
+  /** Saturated red-violet for the mouth line. */
+  lip: Hsl
+  /** The nose's own hue: the picture's chroma peak, not a warmed skin tone. */
+  noseAccent: Hsl
+  /** The soft ink. Marks that should sit back. */
   ink: Hsl
   /** Grime colour, derived from the environment the character works in. */
   grime: Hsl

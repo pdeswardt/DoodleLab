@@ -20,6 +20,7 @@ import { Rng as RngImpl } from '../core/rng'
 import type { Noise } from '../core/noise'
 import { Noise as NoiseImpl } from '../core/noise'
 import { type Hsl, css, adjust, clamp } from '../core/color'
+import { STYLES, type StyleProfile } from '../core/style'
 import {
   type Pt, resample, normalAt, bounds, centroid, withClip, tracePath,
   insideSpans, intersectSpans,
@@ -76,6 +77,11 @@ export interface HatchOptions {
 }
 
 export interface ContourOptions extends Omit<StrokeOptions, 'alphaAt'> {
+  /**
+   * Marks that only an untrained hand would draw: the outline around a nose,
+   * an ear, a cheek, a fold. Dropped when the line budget is tight.
+   */
+  optional?: boolean
   /** Direction (radians) in which the outline should press hardest. */
   heavyAngle?: number
   /** How much heavier, 0..1. */
@@ -127,6 +133,29 @@ export class Pencil {
   /** How often the hand lifts. Higher is a sketchier, more broken line. */
   gapScale = 1
 
+  /**
+   * How much of the drawing gets an outline at all.
+   *
+   * Outlining every shape you draw is the single loudest signature of an
+   * untrained hand. At the trained end only real edges are lined — the head
+   * silhouette, the glasses — and the nose, ears, cheeks and folds are defined
+   * by value and hue instead. Marks passed `optional: true` are dropped below
+   * the threshold.
+   */
+  lineCoverage = 1
+
+  /**
+   * Mark budget for the region being drawn, relative to the face.
+   *
+   * The face should carry most of the marks. Left at 1 everywhere, the coat —
+   * with its pattern, pocket, buttons, patches and folds — ends up with more
+   * discrete marks on it than the head, and the eye goes to the shirt.
+   */
+  density = 1
+
+  /** The hand currently holding the pencil. */
+  hand: StyleProfile = STYLES.adult
+
   private styleCache = new Map<number, string>()
 
   constructor(ctx: CanvasRenderingContext2D, rng: Rng, noise: Noise, detail = 1, gain = 1.62) {
@@ -146,6 +175,21 @@ export class Pencil {
   /** Current effective pressure multiplier. */
   press(): number {
     return this.pressure
+  }
+
+  /**
+   * Adopt a drawing style. Everything the profile governs at the mark-making
+   * level is applied here, in one place, rather than being consulted at each
+   * call site.
+   */
+  useStyle(st: StyleProfile): void {
+    this.hand = st
+    this.wobbleScale *= st.wobble
+    this.gapScale *= st.gaps
+    this.nib = st.nib
+    this.lineCoverage = st.construction < 0.5 ? 1 : 0.25 + (1 - st.construction) * 0.6
+    this.gain *= st.valueRange
+    this.pressure *= st.valueRange
   }
 
   /** Memoised `hsla()` strings — colour churn is otherwise the top allocator. */
@@ -258,7 +302,7 @@ export class Pencil {
     // tone needs the lines close enough to touch; anything sparser reads as
     // hatching-as-decoration. Width tracks spacing, so coverage stays constant
     // and only the texture gets finer.
-    const baseSpacing = (o.spacing ?? 2.6) * 0.6 / d
+    const baseSpacing = (o.spacing ?? 2.6) * 0.6 / (d * this.density)
     const baseAngle = (o.angle ?? -0.62) + this.angleBias
     const layerTurn = ((o.layerTurn ?? 26) * Math.PI) / 180
     const alpha = o.alpha ?? 0.085
@@ -383,6 +427,7 @@ export class Pencil {
    */
   contour(pts: readonly Pt[], o: ContourOptions): void {
     if (pts.length < 3) return
+    if (o.optional && this.lineCoverage < 0.55) return
     const closed = o.closed ?? true
     const loop = closed ? [...pts, pts[0]!] : [...pts]
 
@@ -399,8 +444,8 @@ export class Pencil {
     }
 
     this.stroke(loop, {
-      alpha: 0.17 * this.finish,
-      width: 1.25,
+      alpha: 0.17 * this.finish * this.hand.contourAlpha,
+      width: 1.25 * this.hand.contourWidth,
       passes: 2,
       spread: 0.5,
       wobble: 0.7,
@@ -455,6 +500,44 @@ export class Pencil {
     ctx.fillStyle = this.style(ground, alpha)
     ctx.fill()
     ctx.restore()
+  }
+
+  /**
+   * A dark accent: near-opaque pigment, laid hard.
+   *
+   * The drawing had no mechanism capable of producing a genuine dark. Every
+   * mark was translucent at alpha 0.05-0.30, so the whole picture lived inside
+   * a mid-grey band with no blacks and no whites, which is most of why it read
+   * as a child's drawing. This is the fourth mark type alongside stroke, hatch
+   * and contour, and it is meant for perhaps two percent of the picture: the
+   * pupils, the glasses, the deepest core of the hair, the line of the mouth.
+   *
+   * Used widely it would look like felt-tip, so it is deliberately awkward to
+   * reach for.
+   */
+  accent(region: readonly Pt[], color: Hsl, alpha = 0.92): void {
+    const ctx = this.ctx
+    ctx.save()
+    ctx.globalCompositeOperation = 'source-over'
+    tracePath(ctx, region, true)
+    ctx.fillStyle = this.opaque(color, alpha)
+    ctx.fill()
+    ctx.restore()
+    // A little tooth over the top so it still reads as pigment, not as ink.
+    this.hatch(region, {
+      color: adjust(color, -6, 4),
+      alpha: 0.3,
+      spacing: 1.4,
+      angle: 0.7,
+      layers: 1,
+      gaps: 0.1,
+      lane: 8800,
+    })
+  }
+
+  /** Uncached colour lookup, for the rare opaque fills. */
+  private opaque(c: Hsl, alpha: number): string {
+    return css(c, clamp(alpha, 0, 1))
   }
 
   /** Scattered pigment specks — used sparingly, for freckles and confetti. */

@@ -7,7 +7,7 @@
  * same order a real drawing would build them up.
  */
 
-import { adjust, shade, tint, clamp } from '../../core/color'
+import { adjust, shade, tint, clamp, ground } from '../../core/color'
 import type { Genome, PatternStyle } from '../../core/genome'
 import { hasQuirk } from '../../core/quirks'
 import type { Scene } from '../character'
@@ -182,7 +182,7 @@ function drawCollar(s: Scene): void {
         ...necklinePath(g, 24, 1.62).reverse(),
       ]
       p.hatch(band, { color: alt, alpha: 0.14, spacing: 2.2, angle: 0.9, layers: 2, lane: 1920 })
-      p.contour(band, { color: ink, alpha: 0.13, width: 1.2, passes: 1, lane: 1922 })
+      p.contour(band, { color: ink, alpha: 0.13, width: 1.2, passes: 1, optional: true, lane: 1922 })
       break
     }
     case 'turtleneck': {
@@ -241,7 +241,7 @@ function drawCollar(s: Scene): void {
         { x: b.cx - b.neckW * 1.35, y: hemY },
       ]
       p.hatch(bib, { color: alt, alpha: 0.1, spacing: 2.6, angle: 1.4, layers: 1, lane: 1958 })
-      p.contour(bib, { color: ink, alpha: 0.12, width: 1.2, passes: 1, closed: false, lane: 1960 })
+      p.contour(bib, { color: ink, alpha: 0.12, width: 1.2, passes: 1, closed: false, optional: true, lane: 1960 })
       break
     }
     case 'apron': {
@@ -374,7 +374,7 @@ function drawFastenings(s: Scene): void {
       { x: x - w, y }, { x: x + w, y: y - 1 },
       { x: x + w * 0.86, y: y + h }, { x: x - w * 0.86, y: y + h },
     ]
-    p.contour(pocket, { color: adjust(pal.ink, 6), alpha: 0.13, width: 1.2, passes: 1, lane: 2110 })
+    p.contour(pocket, { color: adjust(pal.ink, 6), alpha: 0.13, width: 1.2, passes: 1, optional: true, lane: 2110 })
     p.hatch(pocket, {
       color: shade(pal.garment, 0.7), alpha: 0.05, spacing: 3, angle: 1.3, layers: 1, lane: 2112,
     })
@@ -590,7 +590,7 @@ export function drawGarment(s: Scene): void {
   const pal = g.palette
   const b = g.build
 
-  p.base(torso, tint(pal.garment, 2.1), 0.97)
+  p.base(torso, ground(pal.garment, 1.15), 0.97)
 
   // Local colour, hatched along the drape of the fabric. The direction varies
   // per character — a whole sheet hatched at one angle reads as a print, not
@@ -649,8 +649,8 @@ export function drawGarment(s: Scene): void {
   for (const [i, edge] of [leftEdge, rightEdge].entries()) {
     p.contour(edge, {
       color: adjust(pal.ink, 4, -2),
-      alpha: 0.19,
-      width: 1.5,
+      alpha: 0.13,
+      width: 1.2,
       passes: 2,
       wobble: 0.7,
       closed: false,
