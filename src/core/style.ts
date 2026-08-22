@@ -97,6 +97,16 @@ export interface StyleProfile {
    */
   ink: number
   /**
+   * How much this hand lays flat opaque graphic rather than drawn line.
+   *
+   * A fat closed near-black spectacle frame is the loudest single graphic in
+   * the coloured-pencil reference and it is deliberate there. In a pen drawing
+   * there is only one line weight on the page, so a frame laid as an opaque
+   * ring reads as a sticker pasted onto a soft face — which is exactly what it
+   * looked like.
+   */
+  graphic: number
+  /**
    * The background. 'panel' is the large rounded square the figure sits on;
    * 'patch' is a small shape behind the head — a circle, a square, a scribble,
    * or nothing at all.
@@ -123,6 +133,7 @@ export const STYLES: Record<DrawStyle, StyleProfile> = {
     exaggeration: 1.25,
     saturation: 1.3,
     composition: 'bust',
+    graphic: 1,
     asym: 1.25,
     paperTint: [0, 1, 0],
     // Both ends of this axis are coloured pencil. A bold child's outline is
@@ -148,6 +159,7 @@ export const STYLES: Record<DrawStyle, StyleProfile> = {
     exaggeration: 0.75,
     saturation: 0.85,
     composition: 'bust',
+    graphic: 1,
     asym: 1,
     paperTint: [0, 1, 0],
     ink: 0,
@@ -168,13 +180,15 @@ export const STYLES: Record<DrawStyle, StyleProfile> = {
     wobble: 2.1,
     gaps: 0.55,
     nib: 0.72,
-    contourAlpha: 3.6,
-    contourWidth: 0.9,
+    contourAlpha: 4.4,
+    contourWidth: 1.45,
     taper: 0.35,
     angleSpread: 1.6,
-    // Almost no modelling: the line does the work, not the tone.
+    // Almost no modelling: the line does the work, not the tone. But the line
+    // has to be dark — value range scales pressure on every mark, and at half
+    // strength it made a pen drawing that read as a faint pencil one.
     modelling: 0.12,
-    valueRange: 0.55,
+    valueRange: 1.05,
     hierarchy: 0.15,
     // Features are constructed rather than symbolic — a doodle's eye is a
     // specific wrong shape, not a circle.
@@ -182,6 +196,7 @@ export const STYLES: Record<DrawStyle, StyleProfile> = {
     exaggeration: 2.4,
     saturation: 0.7,
     composition: 'head',
+    graphic: 0,
     // Hard: one eye higher and bigger than the other is most of what makes
     // these read as drawn rather than constructed.
     asym: 3.4,
@@ -223,6 +238,7 @@ export function mixStyles(a: StyleProfile, b: StyleProfile, t: number): StylePro
     exaggeration: l(a.exaggeration, b.exaggeration),
     saturation: l(a.saturation, b.saturation),
     composition: t < 0.5 ? a.composition : b.composition,
+    graphic: l(a.graphic, b.graphic),
     asym: l(a.asym, b.asym),
     paperTint: [
       l(a.paperTint[0], b.paperTint[0]),

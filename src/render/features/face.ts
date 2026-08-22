@@ -54,7 +54,10 @@ function drawOneEye(
   const rng = p.rng
   const rx = r * rng.range(0.95, 1.05)
   const ry = r * e.tall * rng.range(0.95, 1.05)
-  const ink = adjust(pal.ink, -4, 6)
+  // Pulled toward pen-black by however much this hand is a pen, the same way
+  // contours are. Feature lines drawn straight from the pencil ink left the
+  // face soft under an eyewear frame that was not.
+  const ink = p.inkify(adjust(pal.ink, -4, 6))
 
   // Shut when both lids are all the way down, or when this is the winking
   // side. A blink is the far end of the lid range, not a separate drawing.
@@ -166,7 +169,7 @@ function drawOneEye(
     //    whole picture that should be a true dark.
     const pr = ir * f.pupil * 0.56
     const pupil = arc(gx, gy, pr, pr, 0, Math.PI * 2, 18)
-    if (pr > 0.6) p.accent(pupil, pal.keyline, 0.8)
+    if (pr > 0.6) p.accent(pupil, pal.keyline, 0.8 * (0.55 + p.hand.graphic * 0.45))
 
     // 5. The catchlight is reserved paper, laid back over the top — a hard,
     //    round, genuinely white mark.
@@ -392,7 +395,7 @@ function drawBrows(s: Scene): void {
   const f = g.face
   const bg = f.geom.brow
   const rng = p.rng
-  const col = shade(g.palette.hair, 0.6)
+  const col = p.inkify(shade(g.palette.hair, 0.6))
   const w = f.eyeR * 1.25
   // Both brows are always drawn. A unibrow is the pair reaching far enough in
   // to touch, so the far end of the reach range needs the far brow to exist.
@@ -468,7 +471,7 @@ function drawNose(s: Scene): void {
   const uh = b.headRy * 0.1 * f.noseSize
   // Noses run warmer and a touch redder than the rest of the face.
   const col = adjust(g.palette.skin, -6, 22, -8)
-  const ink = adjust(g.palette.ink, 6, 4)
+  const ink = p.inkify(adjust(g.palette.ink, 6, 4))
 
   const rx = uw * 1.15 * ng.width
   const ry = uh * ng.tipH
@@ -632,7 +635,9 @@ function drawMouth(s: Scene): void {
   const w = b.headRx * 0.24 * f.mouthW
   // The mouth line is one of the few marks that should be a real dark, and the
   // lips are the second chroma accent after the nose.
-  const ink = p.hand.construction > 0.5 ? g.palette.keyline : adjust(g.palette.ink, 2, 8, -6)
+  const ink = p.inkify(
+    p.hand.construction > 0.5 ? g.palette.keyline : adjust(g.palette.ink, 2, 8, -6),
+  )
   const lip = g.palette.lip
   const built = p.hand.construction > 0.5
 
@@ -645,7 +650,7 @@ function drawMouth(s: Scene): void {
   const line = (pts: Pt[], alpha = 0.26, width = 1.7): void => {
     // The line of the mouth is one of the few marks that should read as
     // graphic rather than as pigment. Two translucent passes made it woolly.
-    if (built) p.accentStroke(tip(pts), ink, width * 1.05, Math.min(0.8, alpha * 2.4))
+    if (built) p.accentStroke(tip(pts), ink, width * 1.05, Math.min(0.8, alpha * 2.4) * (0.5 + p.hand.graphic * 0.5))
     else p.stroke(tip(pts), { color: ink, alpha, width, passes: 2, wobble: 0.35, taper: 0.45, lane: 1200 })
   }
 

@@ -414,14 +414,28 @@ function drawGlasses(s: Scene): void {
     // instead, so the frame is now laid as an opaque band: the lens outline
     // offset outward and inward, filled as one ring.
     const frameW = sp.frameW * (p.hand.construction > 0.5 ? 1 : 0.8)
-    const c0 = centroid(region)
-    const offsetBy = (k: number): Pt[] => region.map((q) => {
-      const dx = q.x - c0.x
-      const dy = q.y - c0.y
-      const len = Math.hypot(dx, dy) || 1
-      return { x: q.x + (dx / len) * k, y: q.y + (dy / len) * k }
-    })
-    p.accentRing(offsetBy(frameW), offsetBy(-frameW), ink, 0.86)
+    if (p.hand.graphic > 0.5) {
+      const c0 = centroid(region)
+      const offsetBy = (k: number): Pt[] => region.map((q) => {
+        const dx = q.x - c0.x
+        const dy = q.y - c0.y
+        const len = Math.hypot(dx, dy) || 1
+        return { x: q.x + (dx / len) * k, y: q.y + (dy / len) * k }
+      })
+      p.accentRing(offsetBy(frameW), offsetBy(-frameW), ink, 0.86 * p.hand.graphic)
+    } else {
+      // A hand with only one line weight draws the frame the way it draws
+      // everything else. Laid as an opaque ring it was the one hard-edged
+      // near-black object on a page of soft pencil, and it read as a sticker.
+      p.contour(region, {
+        color: ink,
+        alpha: 0.19,
+        width: frameW * 1.15,
+        passes: 2,
+        wobble: 1.1,
+        lane: 3104 + side,
+      })
+    }
     // Highlight streak — a gap left in the tone plus one bright stroke.
     p.stroke([{ x: cx - r * 0.7, y: cy + r * 0.35 }, { x: cx - r * 0.1, y: cy - r * 0.55 }], {
       color: hsl(200, 20, 92), alpha: 0.2, width: 1.6, passes: 1, taper: 0.8, lane: 3108 + side,
@@ -448,8 +462,13 @@ function drawGlasses(s: Scene): void {
     ? quad({ x: b.cx - bx, y: by }, { x: b.cx, y: by + r * sp.bridgeSag * 2 }, { x: b.cx + bx, y: by }, 10)
     : [{ x: b.cx - bx, y: by }, { x: b.cx + bx, y: by }]
   const bridgeW = Math.max(1.2, sp.frameW * 0.95)
-  p.stroke(bridge, { color: ink, alpha: 0.34, width: bridgeW, passes: 1, wobble: 0.3, lane: 3116 })
-  p.accentStroke(bridge, ink, bridgeW * 1.2, 0.8)
+  p.stroke(bridge, {
+    color: ink, alpha: 0.34, width: bridgeW,
+    passes: p.hand.graphic > 0.5 ? 1 : 2,
+    wobble: 0.3 + (1 - p.hand.graphic) * 0.9,
+    lane: 3116,
+  })
+  if (p.hand.graphic > 0.5) p.accentStroke(bridge, ink, bridgeW * 1.2, 0.8 * p.hand.graphic)
 
   if (sp.strap) {
     // A strap round the head instead of arms. It passes *behind* the skull, so
