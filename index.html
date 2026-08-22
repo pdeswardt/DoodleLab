@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PencilFolk — procedural character sheets</title>
+  <meta name="description" content="A seeded procedural population generator that draws coloured-pencil character sheets: 256 people, one archetype, no clones." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="app">
+    <header class="bar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">✎</span>
+        <span class="brand-name">PencilFolk</span>
+        <span class="brand-sub">procedural population, drawn in colour pencil</span>
+      </div>
+
+      <div class="bar-controls">
+        <label class="field seed-field">
+          <span class="field-label">Seed</span>
+          <input id="seed" type="text" spellcheck="false" autocomplete="off" />
+        </label>
+        <button id="dice" class="btn btn-icon" title="New random seed (R)">🎲</button>
+
+        <label class="field">
+          <span class="field-label">Mood</span>
+          <select id="mood"></select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Grid</span>
+          <select id="grid">
+            <option value="8">8 × 8</option>
+            <option value="12">12 × 12</option>
+            <option value="16" selected>16 × 16</option>
+            <option value="20">20 × 20</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Quality</span>
+          <select id="quality">
+            <option value="0.42">Draft</option>
+            <option value="0.58" selected>Standard</option>
+            <option value="0.8">Fine</option>
+          </select>
+        </label>
+
+        <button id="draw" class="btn btn-primary">Draw the sheet</button>
+        <button id="export" class="btn">Export PNG</button>
+        <button id="studio-toggle" class="btn btn-icon" title="Studio controls">⚙</button>
+      </div>
+    </header>
+
+    <div class="body">
+      <aside id="studio" class="studio">
+        <h2 class="studio-title">Studio</h2>
+
+        <section class="group">
+          <h3>Population</h3>
+          <div class="slider" data-key="variationStrength">
+            <label>Variation strength <output>0.50</output></label>
+            <input type="range" min="0" max="1" step="0.01" value="0.5" />
+            <p class="hint">How far individuals may stray from the archetype mean. Even at 1.0 they stay recognisably the same population.</p>
+          </div>
+          <div class="slider" data-key="memorability">
+            <label>Memorability <output>0.35</output></label>
+            <input type="range" min="0" max="1" step="0.01" value="0.35" />
+            <p class="hint">Chance of a character carrying a signature trait — and how loudly. Separate from variation on purpose.</p>
+          </div>
+          <div class="slider" data-key="ageBias">
+            <label>Age skew <output>0.00</output></label>
+            <input type="range" min="-1" max="1" step="0.01" value="0" />
+            <p class="hint">Tilts the whole population younger or older.</p>
+          </div>
+        </section>
+
+        <section class="group">
+          <h3>Quirks</h3>
+          <label class="check"><input type="checkbox" id="quirks-on" checked /> Quirk layer enabled</label>
+          <div class="slider" data-key="quirkDensity">
+            <label>Quirk density <output>1.00</output></label>
+            <input type="range" min="0" max="2" step="0.01" value="1" />
+            <p class="hint">1.00 is the designed rarity: 55% none, 30% one, 12% two, 3% three.</p>
+          </div>
+          <div class="slider" data-key="maxQuirks">
+            <label>Maximum per person <output>3</output></label>
+            <input type="range" min="0" max="3" step="1" value="3" />
+          </div>
+        </section>
+
+        <section class="group">
+          <h3>Condition</h3>
+          <div class="slider" data-key="cleanliness">
+            <label>Cleanliness <output>0.72</output></label>
+            <input type="range" min="0" max="1" step="0.01" value="0.72" />
+          </div>
+          <div class="slider" data-key="wear">
+            <label>Garment wear <output>0.35</output></label>
+            <input type="range" min="0" max="1" step="0.01" value="0.35" />
+            <p class="hint">Wear also comes from years in the role, so this is a bias, not a switch.</p>
+          </div>
+        </section>
+
+        <section class="group">
+          <h3>Colour</h3>
+          <div class="slider" data-key="warmth">
+            <label>Warmth <output>0.10</output></label>
+            <input type="range" min="-1" max="1" step="0.01" value="0.1" />
+          </div>
+        </section>
+
+        <section class="group">
+          <h3>Locks</h3>
+          <p class="hint">Locked subsystems survive a reroll. Redraw with a new seed to see it.</p>
+          <div id="locks" class="chips"></div>
+        </section>
+      </aside>
+
+      <main class="stage">
+        <div id="progress" class="progress" hidden>
+          <div class="progress-bar"><span></span></div>
+          <p class="progress-label">Sharpening pencils…</p>
+        </div>
+        <div id="sheet" class="sheet"></div>
+      </main>
+    </div>
+
+    <footer class="statusbar">
+      <div id="stats" class="stats"></div>
+      <div class="zoom">
+        <span>Zoom</span>
+        <input id="zoom" type="range" min="70" max="260" step="2" value="132" />
+      </div>
+    </footer>
+  </div>
+
+  <div id="inspector" class="inspector" hidden>
+    <div class="inspector-panel">
+      <button id="inspector-close" class="btn btn-icon inspector-close" title="Close (Esc)">✕</button>
+      <div class="inspector-art">
+        <canvas id="inspector-canvas" width="480" height="600"></canvas>
+      </div>
+      <div class="inspector-info">
+        <h2 id="inspector-word"></h2>
+        <p id="inspector-sub" class="inspector-sub"></p>
+        <div id="inspector-quirks" class="quirks"></div>
+        <dl id="inspector-rows" class="rows"></dl>
+        <div class="inspector-actions">
+          <button class="btn" data-reroll="face">Reroll face</button>
+          <button class="btn" data-reroll="hair">Reroll hair</button>
+          <button class="btn" data-reroll="wardrobe">Reroll wardrobe</button>
+          <button class="btn" data-reroll="condition">Reroll condition</button>
+          <button class="btn" data-reroll="quirk">Reroll quirks</button>
+          <button class="btn" data-reroll="palette">Reroll colour</button>
+        </div>
+        <div class="inspector-actions">
+          <button class="btn btn-primary" id="download-one">Download PNG</button>
+          <button class="btn" id="copy-dna">Copy DNA</button>
+        </div>
+        <details class="dna">
+          <summary>Character DNA</summary>
+          <textarea id="dna-text" spellcheck="false" rows="4"></textarea>
+          <button class="btn" id="load-dna">Load DNA into slot</button>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
