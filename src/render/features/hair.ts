@@ -250,16 +250,63 @@ function capRegion(s: Scene): Pt[] {
   const z = swollen[0]!
   const steps = 20
   const line: Pt[] = []
-  const arch = b.headRy * (h.fringe > 0.62 ? 0.1 : -0.13)
+  // The arch runs continuously from a fringe hanging down in the middle to one
+  // arcing up over the brow, rather than flipping at a threshold — the
+  // threshold gave a whole sheet two hairlines.
+  const hr = p.rng.fork('hairline')
+  const arch = b.headRy * (h.fringe - 0.62) * hr.range(0.22, 0.46)
+  const lobes = 2 + Math.round(h.curl * 4) + hr.int(0, 3)
+  const depth = (1.2 + h.curl * 2.4) * hr.range(0.5, 1.6)
+  const phase = hr.range(0, Math.PI * 2)
+  const rough = hr.range(0.8, 3.2)
   for (let i = 1; i < steps; i++) {
     const t = i / steps
     const q = lerpPt(a, z, t)
     const scallop =
-      Math.sin(t * Math.PI * (2 + Math.round(h.curl * 4))) * (1.2 + h.curl * 2.4) +
-      p.noise.at1(t * 5, 3) * 2
+      Math.sin(phase + t * Math.PI * lobes) * depth +
+      p.noise.at1(t * 5, 3) * rough
     line.push({ x: q.x, y: q.y + scallop + Math.sin(t * Math.PI) * arch })
   }
   return [...swollen, ...line]
+}
+
+/**
+ * How this head's hair actually grows.
+ *
+ * `fillMass` is fully parametric, but every call site passed literals — the
+ * same fan window, the same strand count, the same bend and sheen — so two
+ * characters sharing a style preset got the same mass at a different scale.
+ * These are drawn from the character's own seed instead.
+ */
+interface HairHand {
+  /** Where the fan starts and stops, as an offset on the literal window. */
+  fanIn: number
+  fanOut: number
+  /** Strand density multiplier. */
+  density: number
+  /** How far each strand bows away from the whorl. */
+  bend: number
+  /** Specular sheen along the crown. */
+  sheen: number
+  /** Where the whorl sits, beyond what the parting already says. */
+  whorlX: number
+  whorlY: number
+  /** Length multiplier on the mass. */
+  reach: number
+}
+
+function hairHand(p: Pencil): HairHand {
+  const rng = p.rng.fork('hair-hand')
+  return {
+    fanIn: rng.range(-0.18, 0.3),
+    fanOut: rng.range(-0.3, 0.18),
+    density: rng.range(0.62, 1.5),
+    bend: rng.range(0.2, 1.15),
+    sheen: rng.range(0.02, 0.34),
+    whorlX: rng.gauss(0, 0.16),
+    whorlY: rng.gauss(0, 0.1),
+    reach: rng.range(0.8, 1.3),
+  }
 }
 
 export function drawHairBack(s: Scene): void {
@@ -274,16 +321,20 @@ export function drawHairBack(s: Scene): void {
   if (h.back * 0.14 + fallOut * 0.2 > 0.075 || fallOut > 0.12) {
     const region = backRegion(s)
     s.hairBehind = region
+    const hand = hairHand(p)
     fillMass(p, g, region, {
-      whorl: { x: g.build.cx + h.part * g.build.headRx * 0.4, y: g.build.cy - g.build.headRy * 0.82 },
-      from: 0.25,
-      to: Math.PI - 0.25,
-      count: 30,
-      len: g.build.headRy * (1.1 + h.sides * 0.9),
+      whorl: {
+        x: g.build.cx + (h.part + hand.whorlX) * g.build.headRx * 0.4,
+        y: g.build.cy - g.build.headRy * (0.82 + hand.whorlY),
+      },
+      from: 0.25 + hand.fanIn,
+      to: Math.PI - 0.25 + hand.fanOut,
+      count: Math.round(30 * hand.density),
+      len: g.build.headRy * (1.1 + h.sides * 0.9) * hand.reach,
       curl: h.curl * 0.7,
-      bend: 0.5,
+      bend: hand.bend,
       lane: 200,
-      sheen: 0.12,
+      sheen: hand.sheen * 0.6,
     }, s.lx, s.ly)
   }
 
@@ -308,19 +359,20 @@ export function drawHairFront(s: Scene): void {
     const cap = capRegion(s)
     if (cap.length > 3) {
       s.hairFrontRegion = cap
+      const hand = hairHand(p)
       fillMass(p, g, cap, {
         whorl: {
-          x: g.build.cx + h.part * g.build.headRx * 0.55,
-          y: g.build.cy - g.build.headRy * (0.95 + h.crown * 0.3),
+          x: g.build.cx + (h.part + hand.whorlX) * g.build.headRx * 0.55,
+          y: g.build.cy - g.build.headRy * (0.95 + h.crown * 0.3 + hand.whorlY),
         },
-        from: 0.15,
-        to: Math.PI - 0.15,
-        count: 26,
-        len: g.build.headRy * (0.8 + h.crown * 0.7),
+        from: 0.15 + hand.fanIn,
+        to: Math.PI - 0.15 + hand.fanOut,
+        count: Math.round(26 * hand.density),
+        len: g.build.headRy * (0.8 + h.crown * 0.7) * hand.reach,
         curl: h.curl,
-        bend: 0.55,
+        bend: hand.bend,
         lane: 260,
-        sheen: 0.2,
+        sheen: hand.sheen,
       }, s.lx, s.ly)
     }
   }
@@ -340,21 +392,25 @@ export function drawHairFront(s: Scene): void {
 
 function drawBun(s: Scene, at: Pt, r: number): void {
   const { p, g } = s
-  const region = blob(at.x, at.y, r, r * 0.92, p.noise, {
-    wobble: 0.09 + g.hair.curl * 0.06,
-    lumps: 3.4,
+  // A loose coil and a tight knot are the same construction at different
+  // settings; one aspect and one strand count made every bun the same bun.
+  const br = p.rng.fork('bun')
+  const aspect = br.range(0.66, 1.25)
+  const region = blob(at.x, at.y, r * br.range(0.82, 1.2), r * 0.92 * aspect, p.noise, {
+    wobble: 0.09 + g.hair.curl * 0.06 + br.range(0, 0.1),
+    lumps: br.range(2.2, 4.6),
     lane: 17,
     steps: 34,
   })
   // Strands wrap around a bun rather than radiating from it.
   fillMass(p, g, region, {
-    whorl: { x: at.x, y: at.y },
+    whorl: { x: at.x + br.gauss(0, r * 0.2), y: at.y + br.gauss(0, r * 0.2) },
     from: -Math.PI,
     to: Math.PI,
-    count: 16,
-    len: r * 2.2,
+    count: br.int(9, 26),
+    len: r * br.range(1.5, 3.2),
     curl: 0.55 + g.hair.curl * 0.4,
-    bend: 1.5,
+    bend: br.range(0.7, 2.2),
     lane: 320,
     sheen: 0.22,
   }, s.lx, s.ly)
@@ -435,13 +491,19 @@ function drawBraids(s: Scene): void {
     const side = k % 2 === 0 ? -1 : 1
     const x0 = s.headCentre.x + side * b.headRx * 0.86
     const y0 = s.headCentre.y + b.headRy * 0.18
-    const len = b.headRy * (0.9 + g.hair.sides * 0.5)
-    const knots = 4
+    const kr = p.rng.fork('braid')
+    const len = b.headRy * (0.9 + g.hair.sides * 0.5) * kr.range(0.75, 1.35)
+    // Knot count and how fast the plait tapers are what a braid actually is.
+    const knots = kr.int(3, 7)
+    const sway = kr.range(1.5, 5)
+    const beat = kr.range(4, 9)
+    const r0 = kr.range(4.2, 8)
+    const taper = kr.range(0.25, 0.7)
     for (let i = 0; i < knots; i++) {
       const t = i / knots
-      const cx = x0 + side * 3 * Math.sin(t * 6)
+      const cx = x0 + side * sway * Math.sin(t * beat)
       const cy = y0 + len * t
-      const r = 6 * (1 - t * 0.45)
+      const r = r0 * (1 - t * taper)
       const region = blob(cx, cy, r, r * 0.8, p.noise, { wobble: 0.12, lumps: 2, lane: 30 + i + k * 5, steps: 20 })
       fillMass(p, g, region, {
         whorl: { x: cx, y: cy },
@@ -460,19 +522,24 @@ function drawMohawk(s: Scene): void {
   const { p, g } = s
   const b = g.build
   const h = g.hair
-  const height = b.headRy * (0.45 + h.crown * 0.8)
-  const spikes = 5 + Math.round(h.curl * 4)
-  const halfW = b.headRx * 0.32
+  // A crest is a shape, not a constant: how wide it is, how many spikes it has
+  // and how far they lean are what separate a liberty spike from a brush cut.
+  const mr = p.rng.fork('crest')
+  const height = b.headRy * (0.45 + h.crown * 0.8) * mr.range(0.7, 1.35)
+  const spikes = Math.max(3, 4 + Math.round(h.curl * 4) + mr.int(-1, 4))
+  const halfW = b.headRx * mr.range(0.18, 0.46)
+  const fan = mr.range(0.05, 0.42)
+  const sharp = mr.range(0.2, 0.55)
 
   // Individually tapered spikes rather than one zigzag polygon: a single
   // outline filled in reads as a brush head, not as hair standing up.
   for (let i = 0; i < spikes; i++) {
     const t = spikes > 1 ? i / (spikes - 1) : 0.5
     const x = s.headCentre.x - halfW + t * halfW * 2
-    const lean = (t - 0.5) * b.headRx * 0.22
+    const lean = (t - 0.5) * b.headRx * fan
     const tall = height * (0.55 + 0.55 * Math.sin(t * Math.PI)) * p.rng.range(0.85, 1.15)
     const base = s.headCentre.y - b.headRy * 0.72
-    const wide = halfW * 0.34
+    const wide = (halfW / Math.max(2, spikes - 1)) * 2 * sharp
     const spike: Pt[] = [
       { x: x - wide, y: base },
       { x: x + lean * 0.5, y: base - tall * 0.6 },
@@ -562,8 +629,13 @@ function drawSideFuzz(s: Scene): void {
   const { p, g } = s
   const b = g.build
   const rng = p.rng
-  for (let i = 0; i < 16; i++) {
-    const a = rng.bool(0.5) ? rng.range(Math.PI * 0.75, Math.PI * 1.05) : rng.range(-0.05, 0.25)
+  // How wispy a head is, rather than always exactly sixteen strays.
+  const strays = rng.int(4, 30)
+  const spread = rng.range(0.1, 0.45)
+  for (let i = 0; i < strays; i++) {
+    const a = rng.bool(0.5)
+      ? rng.range(Math.PI * (0.9 - spread), Math.PI * (0.9 + spread * 0.4))
+      : rng.range(-spread * 0.5, spread)
     const ox = b.cx + Math.cos(a) * b.headRx * 0.98
     const oy = b.cy + Math.sin(a) * b.headRy * 0.98
     p.stroke(strandPath(ox, oy, a, 6 * rng.range(0.6, 1.4), 0.5, 0.3, rng.next() * 6, 5), {

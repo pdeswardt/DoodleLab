@@ -16,12 +16,62 @@ import type { Pt } from './shapes'
 const FONT_STACK =
   '"Caveat", "Segoe Script", "Bradley Hand", "Brush Script MT", "Comic Sans MS", cursive'
 
+/**
+ * How this character's hand writes.
+ *
+ * Every caption on a sheet was set at 26px with the same tracking, the same
+ * baseline wobble and the same rule underneath it — 256 words in one hand, on
+ * a page whose whole argument is that nothing repeats. These are drawn from
+ * the character's own seed, so a caption belongs to its portrait.
+ */
+interface CaptionHand {
+  size: number
+  /** Multiplier on the natural advance width. Below 1 crowds, above 1 spaces out. */
+  tracking: number
+  /** How far each letter strays off the baseline, as a fraction of size. */
+  drift: number
+  /** Per-letter rotation, in radians. */
+  waver: number
+  /** A consistent lean across the whole word — the strongest handwriting cue. */
+  slant: number
+  /** Where the word sits across the cell, as a fraction of its width. */
+  offset: number
+  /** Baseline climb or fall across the word, as a fraction of size. */
+  rake: number
+  /** Direction of the pigment hatching behind the glyphs. */
+  hatchAngle: number
+  /** 0 = no rule under the word. */
+  rule: number
+  ruleWobble: number
+  ruleDrop: number
+}
+
+function captionHand(p: Pencil): CaptionHand {
+  const rng = p.rng.fork('caption-hand')
+  // A rule under the word is a flourish, and a flourish is not universal.
+  const rule = rng.bool(0.62) ? rng.range(0.75, 1.15) : 0
+  return {
+    size: rng.range(19, 28),
+    tracking: rng.range(0.9, 1.12),
+    drift: rng.range(0.02, 0.085),
+    waver: rng.range(0.012, 0.07),
+    slant: rng.gauss(0, 0.075),
+    offset: rng.gauss(0, 0.035),
+    rake: rng.gauss(0, 0.055),
+    hatchAngle: rng.range(-1.1, 0.2),
+    rule,
+    ruleWobble: rng.range(0.3, 1.4),
+    ruleDrop: rng.range(0.34, 0.52),
+  }
+}
+
 export function drawCaption(
   ctx: CanvasRenderingContext2D, g: Genome, p: Pencil,
 ): void {
   const word = g.word
   if (!word) return
 
+  const hand = captionHand(p)
   const boxH = 40
   const boxY = ART.captionY - 26
   const scale = 2 // supersample, so the mask edge stays crisp when scaled back
@@ -32,7 +82,7 @@ export function drawCaption(
   octx.scale(scale, scale)
 
   // Fit the word to the cell.
-  let size = 26
+  let size = hand.size
   octx.font = `${size}px ${FONT_STACK}`
   const maxW = ART.w * 0.78
   let width = octx.measureText(word).width
@@ -48,16 +98,17 @@ export function drawCaption(
   // Hatch only the box the word actually occupies. Covering the full strip and
   // masking it was costing more than the entire face.
   const halfW = Math.min(maxW, width) * 0.5 + 3
+  const midX = ART.w / 2 + hand.offset * halfW
   const top = boxH * 0.5 - size * 0.72
   const strip: Pt[] = [
-    { x: ART.w / 2 - halfW, y: top }, { x: ART.w / 2 + halfW, y: top },
-    { x: ART.w / 2 + halfW, y: top + size * 1.5 }, { x: ART.w / 2 - halfW, y: top + size * 1.5 },
+    { x: midX - halfW, y: top }, { x: midX + halfW, y: top },
+    { x: midX + halfW, y: top + size * 1.5 }, { x: midX - halfW, y: top + size * 1.5 },
   ]
   pen.hatch(strip, {
     color: ink,
     alpha: 0.5,
     spacing: 1.7,
-    angle: -0.5,
+    angle: hand.hatchAngle,
     layers: 2,
     layerTurn: 34,
     curve: 1.2,
@@ -93,15 +144,24 @@ export function drawCaption(
   const jitter = p.rng.fork('caption-letters')
   const widths = [...word].map((ch) => mctx.measureText(ch).width)
   const total = widths.reduce((a, b) => a + b, 0)
-  let x = ART.w / 2 - total / 2
+  const spread = total * hand.tracking
+  let x = midX - spread / 2
+  const n = Math.max(1, word.length - 1)
   for (const [i, ch] of [...word].entries()) {
     const cw = widths[i]!
+    // The rake tips the whole line, the drift is the hand shaking on each
+    // letter. Both together are what a written line does; either alone reads
+    // as a font effect.
+    const t = i / n - 0.5
     mctx.save()
-    mctx.translate(x + cw / 2, boxH / 2 + 1 + jitter.gauss(0, size * 0.045))
-    mctx.rotate(jitter.gauss(0, 0.035))
+    mctx.translate(
+      x + cw / 2,
+      boxH / 2 + 1 + t * size * hand.rake + jitter.gauss(0, size * hand.drift),
+    )
+    mctx.rotate(hand.slant + jitter.gauss(0, hand.waver))
     mctx.fillText(ch, 0, 0)
     mctx.restore()
-    x += cw * jitter.range(0.94, 1.04)
+    x += cw * hand.tracking * jitter.range(0.95, 1.05)
   }
 
   octx.globalCompositeOperation = 'destination-in'
@@ -116,17 +176,19 @@ export function drawCaption(
   ctx.drawImage(off, 0, boxY, ART.w, boxH)
   ctx.restore()
 
-  // 4. A short rule under the word, drawn by hand rather than masked.
-  const half = halfW + 1
-  const y = boxY + boxH * 0.5 + size * 0.42
+  // 4. A short rule under the word, drawn by hand rather than masked — on the
+  // captions whose hand underlines at all.
+  if (hand.rule <= 0) return
+  const half = (halfW + 1) * hand.rule
+  const y = boxY + boxH * 0.5 + size * hand.ruleDrop
   p.stroke(
-    [{ x: ART.w / 2 - half, y }, { x: ART.w / 2 + half, y: y + p.rng.gauss(0, 1) }],
+    [{ x: midX - half, y }, { x: midX + half, y: y + p.rng.gauss(0, 1.4) }],
     {
       color: adjust(g.palette.accent, -8, 6),
       alpha: 0.16,
       width: 1.3,
       passes: 1,
-      wobble: 0.6,
+      wobble: hand.ruleWobble,
       gaps: 0.3,
       taper: 0.9,
       lane: 4100,

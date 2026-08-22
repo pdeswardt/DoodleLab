@@ -273,11 +273,21 @@ function drawWash(s: Scene): void {
   // A warm note is mixed in alongside the two cool ones, because the reference
   // is not one tint — it runs cool across the top and warms toward one side.
   // Low enough in lightness to actually register once it is hatched at a few
-  // per cent alpha — a 93%-light tint over paper is invisible.
-  const warm = hsl(38, 42, 86)
+  // per cent alpha — a 93%-light tint over paper is invisible. Taken off the
+  // character's own accent rather than a literal, which put the same warm note
+  // behind all 256 figures, and drifted per character so two panels sharing a
+  // palette are still not the same panel.
+  const wr = p.rng.fork('wash-tone')
+  const warm = hsl(
+    pal.accent.h + wr.gauss(0, 14),
+    clamp(pal.accent.s * wr.range(0.3, 0.6), 12, 52),
+    clamp(84 + wr.gauss(0, 5), 74, 92),
+  )
   p.washPanel(w.cx, w.cy, w.rx, w.ry, w.n, [pal.wash, warm, pal.washAlt], {
-    alpha: 0.062,
-    spacing: 3.6,
+    // Kept inside a narrow band: the panel is a backdrop, and at a third
+    // denser it stops being one and starts competing with the figure.
+    alpha: 0.05 + w.lumps * 0.004,
+    spacing: 3.5 + w.tilt * 2.6,
     wobble: w.wobble * 0.35,
   })
 
