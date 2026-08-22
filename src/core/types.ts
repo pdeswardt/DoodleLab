@@ -16,7 +16,28 @@ import type { CharacterDNA } from './dna'
 export type LidStyle = 'open' | 'wide' | 'half' | 'closed' | 'wink' | 'sparkle' | 'squint'
 export type NoseStyle = 'button' | 'beak' | 'upturned' | 'broad' | 'long' | 'blob'
 export type MouthStyle = 'smile' | 'grin' | 'smirk' | 'ohh' | 'flat' | 'toothy' | 'pout' | 'whistle'
-export type BrowStyle = 'soft' | 'bushy' | 'thin' | 'arched' | 'straight' | 'worried'
+export type BrowStyle =
+  | 'soft' | 'bushy' | 'thin' | 'arched' | 'straight' | 'worried'
+  | 'bar' | 'wedge' | 'comma' | 'dash' | 'unibrow' | 'angled'
+
+/** Eye outlines are built from corner positions, not from a clamped ellipse. */
+export type EyeShape =
+  | 'round' | 'almond' | 'narrow' | 'droop' | 'upturn' | 'wide' | 'dot' | 'hooded'
+
+/**
+ * Head silhouette families.
+ *
+ * Not modifiers on one oval — each is its own width-versus-height profile, so a
+ * heart-shaped face and a jowly one are different constructions rather than the
+ * same egg with different numbers.
+ */
+export type HeadFamily =
+  | 'oval' | 'heart' | 'blocky' | 'pear' | 'long'
+  | 'bulb' | 'angular' | 'lopsided' | 'chinny' | 'wide'
+
+/** How the shoulders are built. The single biggest silhouette cue in a bust. */
+export type ShoulderStyle =
+  | 'sloped' | 'square' | 'round' | 'hunched' | 'narrow' | 'uneven'
 export type CollarStyle =
   | 'buttonup' | 'crew' | 'turtleneck' | 'vneck' | 'overalls'
   | 'apron' | 'robe' | 'hoodie' | 'sailor' | 'ruffle'
@@ -80,7 +101,20 @@ export interface Build {
   headRy: number
   /** Superellipse exponent: >2 squares the skull off, <2 pinches it. */
   headN: number
+  /** Horizontal superellipse exponent — high values flatten the sides. */
+  headNx: number
   shape: HeadShape
+  family: HeadFamily
+  /** Half-width multipliers at crown, upper temple, temple, cheek, jaw, chin. */
+  profile: number[]
+  /** Lopsidedness: one side of the skull wider than the other. */
+  headAsym: number
+  /** Draw the outline with fewer, harder samples — a faceted skull. */
+  facet: boolean
+  shoulderStyle: ShoulderStyle
+  /** Per-side shoulder height offsets. */
+  shoulderRise: [number, number]
+  shoulderRound: number
   jaw: number
   crown: number
   cheek: number
@@ -115,6 +149,9 @@ export interface Asymmetry {
 }
 
 export interface Face {
+  eyeShape: EyeShape
+  /** Scales every feature together — small features on a big face, or the reverse. */
+  featureScale: number
   eyeSpacing: number
   eyeY: number
   eyeR: number

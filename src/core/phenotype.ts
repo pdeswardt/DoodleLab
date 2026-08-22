@@ -61,7 +61,15 @@ function expressBuild(dna: CharacterDNA): Build {
   return {
     cx, cy, headRx, headRy,
     headN: shape.n,
+    headNx: b.headNx,
     shape: b.shape,
+    family: b.family,
+    profile: b.profile,
+    headAsym: b.headAsym,
+    facet: b.facet,
+    shoulderStyle: b.shoulderStyle,
+    shoulderRise: b.shoulderRise,
+    shoulderRound: b.shoulderRound,
     jaw: b.jaw,
     crown: b.crown,
     cheek: b.cheek,
@@ -87,10 +95,13 @@ function expressBuild(dna: CharacterDNA): Build {
 function expressFace(dna: CharacterDNA, build: Build): Face {
   const f = dna.face
   const a = f.asym
+  const fs = f.featureScale
   return {
+    eyeShape: f.eyeShape,
+    featureScale: fs,
     eyeSpacing: build.headRx * f.eyeSpacing,
     eyeY: build.cy + build.headRy * f.eyeY,
-    eyeR: build.headRx * f.eyeSize,
+    eyeR: build.headRx * f.eyeSize * fs,
     eyeTilt: f.eyeTilt,
     lid: f.lid,
     lashes: f.lashes,
@@ -104,12 +115,12 @@ function expressFace(dna: CharacterDNA, build: Build): Face {
     browLift: f.browLift,
     browAngle: f.browAngle,
     nose: f.nose,
-    noseSize: f.noseSize,
+    noseSize: f.noseSize * fs,
     noseY: build.cy + build.headRy * f.noseY,
     mouth: f.mouth,
-    mouthW: f.mouthW,
+    mouthW: f.mouthW * fs,
     mouthY: build.cy + build.headRy * f.mouthY,
-    earSize: f.earSize,
+    earSize: f.earSize * fs,
     earTilt: f.earTilt,
     facialHair: f.facialHair,
     freckles: f.freckles,

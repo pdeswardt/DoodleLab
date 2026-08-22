@@ -24,8 +24,9 @@ import { clamp } from './color'
 import { archetypeById, ARCHETYPES, type Archetype, type Role } from './archetypes'
 import { rollQuirks, type AppliedQuirk, type QuirkContext } from './quirks'
 import type {
-  BrowStyle, CollarStyle, FacialHairStyle, GlassesStyle, HatStyle,
-  HeadShape, LidStyle, MouthStyle, NoseStyle, PatternStyle,
+  BrowStyle, CollarStyle, EyeShape, FacialHairStyle, GlassesStyle, HatStyle,
+  HeadFamily, HeadShape, LidStyle, MouthStyle, NoseStyle, PatternStyle,
+  ShoulderStyle,
 } from './types'
 
 /* ------------------------------------------------------------- subsystems */
@@ -119,6 +120,15 @@ export interface IdentityDNA {
 
 export interface BodyDNA {
   shape: HeadShape
+  family: HeadFamily
+  /** Half-width multipliers at crown, upper temple, temple, cheek, jaw, chin. */
+  profile: number[]
+  headNx: number
+  headAsym: number
+  facet: boolean
+  shoulderStyle: ShoulderStyle
+  shoulderRise: [number, number]
+  shoulderRound: number
   headScale: number
   /** Suggestion of a three-quarter turn, -1 (their right) .. 1. */
   turn: number
@@ -159,6 +169,9 @@ export interface FaceAsymDNA {
 }
 
 export interface FaceDNA {
+  eyeShape: EyeShape
+  /** Scales every feature together, independently of the head it sits on. */
+  featureScale: number
   eyeSize: number
   eyeSpacing: number
   eyeY: number
@@ -340,6 +353,57 @@ function genIdentity(rng: Rng, a: Archetype, role: Role, c: Controls): IdentityD
 
 /* ----------------------------------------------------------------- stage 3 */
 
+/**
+ * Head silhouette families.
+ *
+ * Each entry is a half-width profile sampled at six heights — crown, upper
+ * temple, temple, cheek, jaw, chin — plus the superellipse exponents that say
+ * how flat the sides and the crown are. These are genuinely different skulls
+ * rather than one oval with modifiers, which is the only way a sheet stops
+ * looking like the same head redrawn.
+ */
+const HEAD_FAMILIES: Record<HeadFamily, {
+  profile: number[]
+  nx: number
+  ny: number
+  ratio: number
+  facet?: boolean
+  asym?: number
+}> = {
+  // These are *relative* widths. The superellipse term already tapers toward
+  // the crown and the chin, so a profile value near 1 means "as wide as the
+  // natural taper allows here" and the families differ by where they bulge and
+  // where they pinch — not by driving the chin toward a point, which turns a
+  // head into a diamond.
+  oval: { profile: [0.94, 1.0, 1.02, 1.0, 0.94, 0.86], nx: 2.05, ny: 2.05, ratio: 1.06 },
+  heart: { profile: [0.90, 1.02, 1.09, 0.98, 0.84, 0.70], nx: 2.1, ny: 2.0, ratio: 1.04 },
+  blocky: { profile: [1.02, 1.04, 1.03, 1.03, 1.02, 1.0], nx: 3.4, ny: 3.0, ratio: 1.0 },
+  pear: { profile: [0.84, 0.92, 0.98, 1.06, 1.09, 1.0], nx: 2.3, ny: 2.2, ratio: 1.02 },
+  long: { profile: [0.92, 0.96, 0.97, 0.95, 0.90, 0.84], nx: 2.4, ny: 2.3, ratio: 1.28 },
+  bulb: { profile: [0.80, 0.94, 1.13, 1.15, 0.92, 0.78], nx: 2.0, ny: 1.95, ratio: 0.98 },
+  angular: { profile: [0.98, 1.07, 0.95, 1.07, 0.96, 0.86], nx: 2.7, ny: 2.4, ratio: 1.05, facet: true },
+  lopsided: { profile: [0.94, 1.0, 1.03, 1.0, 0.93, 0.85], nx: 2.2, ny: 2.1, ratio: 1.05, asym: 0.1 },
+  chinny: { profile: [0.92, 0.98, 0.99, 0.97, 0.99, 1.03], nx: 2.5, ny: 2.6, ratio: 1.12 },
+  wide: { profile: [0.96, 1.06, 1.14, 1.10, 0.98, 0.84], nx: 2.2, ny: 2.1, ratio: 0.86 },
+}
+
+/** Shoulder constructions. A bust is mostly silhouette, and this is most of it. */
+export const SHOULDER_STYLES: Record<ShoulderStyle, {
+  tipDrop: number
+  ctrlX: number
+  ctrlY: number
+  round: number
+  width: number
+  rise: number
+}> = {
+  sloped: { tipDrop: 0.42, ctrlX: 0.42, ctrlY: 0.12, round: 0.5, width: 1, rise: 0 },
+  square: { tipDrop: 0.08, ctrlX: 0.64, ctrlY: -0.08, round: 0.18, width: 1.06, rise: 0 },
+  round: { tipDrop: 0.26, ctrlX: 0.33, ctrlY: 0.24, round: 0.95, width: 0.98, rise: 0 },
+  hunched: { tipDrop: 0.04, ctrlX: 0.3, ctrlY: -0.2, round: 0.75, width: 0.9, rise: -0.16 },
+  narrow: { tipDrop: 0.36, ctrlX: 0.38, ctrlY: 0.14, round: 0.62, width: 0.76, rise: 0.05 },
+  uneven: { tipDrop: 0.3, ctrlX: 0.44, ctrlY: 0.08, round: 0.55, width: 1, rise: 0 },
+}
+
 function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
   const v = 0.4 + c.variationStrength * 1.2
 
@@ -353,6 +417,38 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
     ['acorn', 1.6 + Math.max(0, -id.mass) * 2],
     ['moon', 1.4 + Math.max(0, id.mass) * 2],
   ])
+
+  // The silhouette family, weighted by the same latent traits that drive
+  // everything else, then jittered control point by control point so two
+  // characters of the same family still are not the same skull.
+  const family = rng.weighted<HeadFamily>([
+    ['oval', 3],
+    ['heart', 2 + Math.max(0, -id.mass) * 2],
+    ['blocky', 1.6 + Math.max(0, id.frame) * 3 + Math.max(0, id.morph) * 1.6],
+    ['pear', 1.8 + Math.max(0, id.mass) * 2.6],
+    ['long', 1.8 + Math.max(0, -id.mass) * 1.6],
+    ['bulb', 1.4 + Math.max(0, id.mass) * 2.2 + (id.ageBand === 'child' ? 2 : 0)],
+    ['angular', 1.4 + Math.max(0, id.frame) * 1.8],
+    ['lopsided', 1.2],
+    ['chinny', 1.4 + Math.max(0, id.morph) * 1.6],
+    ['wide', 1.5 + Math.max(0, id.mass) * 1.8],
+  ])
+  const fam = HEAD_FAMILIES[family]
+  const spread = 0.035 + c.variationStrength * 0.055
+  // The chin gets a higher floor than the rest: a skull can taper a long way
+  // and still read as a face, but past a point it stops being one.
+  const profile = fam.profile.map((w, i) =>
+    Math.max(i === 5 ? 0.62 : 0.6, w + rng.gauss(0, spread)))
+
+  const shoulderStyle = rng.weighted<ShoulderStyle>([
+    ['sloped', 3],
+    ['square', 2 + Math.max(0, id.frame) * 2.4 + Math.max(0, id.muscularity) * 1.6],
+    ['round', 2.2 + Math.max(0, id.mass) * 2],
+    ['hunched', 1.4 + Math.max(0, -id.posture) * 3],
+    ['narrow', 1.6 + Math.max(0, -id.frame) * 2.6 + (id.ageBand === 'child' ? 2 : 0)],
+    ['uneven', 1.2],
+  ])
+  const shoulder = SHOULDER_STYLES[shoulderStyle]
 
   // Children have proportionally larger heads; that is the single strongest
   // age cue available in a bust.
@@ -376,7 +472,19 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
 
   return {
     shape, headScale,
-    headRatio: clamp(1.04 + rng.gauss(0, 0.075 * v) - id.mass * 0.05, 0.86, 1.24),
+    family,
+    profile,
+    headNx: fam.nx * rng.range(0.9, 1.12),
+    headAsym: (fam.asym ?? 0) * rng.sign() + rng.gauss(0, 0.022 * v),
+    facet: fam.facet ?? false,
+    shoulderStyle,
+    // An uneven pair of shoulders is its own style, but every figure gets a
+    // little of it.
+    shoulderRise: shoulderStyle === 'uneven'
+      ? [rng.range(-0.14, 0.02), rng.range(-0.02, 0.16)]
+      : [rng.gauss(0, 0.025), rng.gauss(0, 0.025)],
+    shoulderRound: shoulder.round * rng.range(0.8, 1.25),
+    headRatio: clamp(fam.ratio + rng.gauss(0, 0.075 * v) - id.mass * 0.05, 0.82, 1.34),
     jaw, crown: clamp(1 + rng.gauss(0, 0.09 * v) - id.mass * 0.04, 0.76, 1.3),
     cheek,
     chin: clamp(1 + id.morph * 0.08 + rng.gauss(0, 0.09 * v), 0.8, 1.26),
@@ -392,8 +500,8 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
     nib: clamp(rng.gauss(0.84, 0.13), 0.58, 1.06),
     looseness: clamp(rng.gauss(1, 0.34), 0.4, 1.9),
     neck: clamp(0.5 + id.muscularity * 0.09 + id.mass * 0.07 + rng.gauss(0, 0.04 * v), 0.36, 0.72),
-    shoulderSpan,
-    slope: clamp(0.3 - id.posture * 0.1 + id.muscularity * 0.05 + rng.gauss(0, 0.05), 0.12, 0.48),
+    shoulderSpan: shoulderSpan * shoulder.width,
+    slope: clamp(shoulder.tipDrop + rng.gauss(0, 0.06) - id.posture * 0.05, 0.02, 0.6),
     // Posture shows up as a small lean; slumped people tip slightly further.
     tilt: rng.gauss(-id.posture * 0.01, 0.035 + c.variationStrength * 0.04),
     cxJitter: rng.gauss(0, 2.6 + c.variationStrength * 3.4),
@@ -452,11 +560,24 @@ function genFace(rng: Rng, id: IdentityDNA, body: BodyDNA, a: Archetype, c: Cont
 
   const asymScale = 0.4 + c.variationStrength * 1.3
   return {
+    eyeShape: rng.weighted<EyeShape>([
+      ['round', 3 + young * 2],
+      ['almond', 2.6],
+      ['narrow', 1.6 + old * 1.4],
+      ['droop', 1.4 + old * 1.8],
+      ['upturn', 1.6],
+      ['wide', 1.6 + young * 1.6],
+      ['dot', 1 + Math.max(0, id.mass) * 1.2],
+      ['hooded', 1.3 + old * 2 + Math.max(0, id.morph)],
+    ]),
+    // Two people with the same size head can carry very differently sized
+    // features on it, and that reads as strongly as any single proportion.
+    featureScale: clamp(rng.gauss(1, 0.11 * v), 0.72, 1.32),
     eyeSize,
     // Eye spacing follows the width of the face it sits on, rather than being
     // sampled independently of the skull it has to fit inside.
     eyeSpacing: clamp(0.53 + (body.cheek - 1) * 0.08 + rng.gauss(0, 0.05 * v), 0.4, 0.68),
-    eyeY: clamp(0.09 + young * 0.03 + rng.gauss(0, 0.032 * v), 0.0, 0.19),
+    eyeY: clamp(0.09 + young * 0.04 + rng.gauss(0, 0.055 * v), -0.04, 0.24),
     eyeTilt: rng.gauss(0, 0.075 * v),
     lid,
     lashes: rng.bool(0.42 + Math.max(0, -id.morph) * 0.2),
@@ -469,21 +590,24 @@ function genFace(rng: Rng, id: IdentityDNA, body: BodyDNA, a: Archetype, c: Cont
     gazeX: rng.gauss(0, 0.26),
     gazeY: rng.gauss(-0.08, 0.18),
     brow: rng.weighted<BrowStyle>([
-      ['soft', 4], ['bushy', 1.4 + id.morph * 2 + old], ['thin', 2 - id.morph],
-      ['arched', 2], ['straight', 1.8 + id.morph], ['worried', 1.2],
+      ['soft', 2.6], ['bushy', 1.2 + id.morph * 2 + old], ['thin', 1.8 - id.morph],
+      ['arched', 1.8], ['straight', 1.4 + id.morph], ['worried', 1.1],
+      ['bar', 1.4 + id.morph * 1.2], ['wedge', 1.4], ['comma', 1.3],
+      ['dash', 1.2 + (1 - id.grooming) * 1.2], ['angled', 1.4],
+      ['unibrow', 0.45 + id.morph * 0.8 + (1 - id.grooming) * 0.6],
     ]),
     browThick,
-    browLift: clamp(rng.gauss(0.62, 0.12 * v), 0.35, 0.95),
+    browLift: clamp(rng.gauss(0.62, 0.22 * v), 0.22, 1.25),
     browAngle: rng.gauss(0, 0.12 * v),
     nose: rng.weighted<NoseStyle>([
       ['button', 4 + young * 2], ['upturned', 2.2], ['blob', 1.8 + id.mass],
       ['broad', 1.4 + id.mass * 1.2 + id.morph], ['beak', 1.2 + old], ['long', 0.9 + old],
     ]),
     noseSize: clamp(1 + id.morph * 0.14 + old * 0.14 - young * 0.16 + rng.gauss(0, 0.17 * v), 0.62, 1.55),
-    noseY: clamp(0.36 + rng.gauss(0, 0.028 * v), 0.28, 0.45),
+    noseY: clamp(0.36 + rng.gauss(0, 0.05 * v), 0.24, 0.5),
     mouth,
     mouthW: clamp(rng.gauss(1, 0.2 * v), 0.62, 1.55),
-    mouthY: clamp(0.58 + rng.gauss(0, 0.03 * v), 0.5, 0.68),
+    mouthY: clamp(0.58 + rng.gauss(0, 0.055 * v), 0.46, 0.74),
     earSize: clamp(1 + old * 0.16 + rng.gauss(0, 0.11 * v), 0.72, 1.42),
     earTilt: rng.gauss(0, 0.13),
     facialHair,
@@ -991,6 +1115,8 @@ export function featureVector(dna: CharacterDNA): number[] {
     body.headScale * 2, body.shoulderSpan * 0.8, body.jaw, body.cheek, body.turn * 0.8,
     face.eyeSize * 6, face.eyeSpacing * 3, face.noseSize, face.mouthW,
     style * 2, hair.curl, hair.crown, hair.sides, body.nib, body.hatchAngle * 0.6,
+    body.profile[2]! * 1.5, body.profile[5]! * 2, body.headNx * 0.5,
+    face.featureScale * 1.5, face.eyeY * 4, face.mouthY * 3,
     palette.skin[2] / 60, palette.hair[0] / 240, palette.hair[2] / 60,
     palette.garment[0] / 200, palette.garment[2] / 70,
     wardrobe.collar.length / 10, wardrobe.pattern.length / 10,

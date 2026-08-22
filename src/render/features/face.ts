@@ -9,15 +9,15 @@
  */
 
 import { adjust, shade, tint, hsl, clamp, type Hsl } from '../../core/color'
-import type { Genome, LidStyle } from '../../core/genome'
+import type { BrowStyle, EyeShape, Genome, LidStyle } from '../../core/genome'
 import type { Scene } from '../character'
 import { radialFalloff } from '../character'
 import type { Pencil } from '../pencil'
-import { type Pt, arc, quad, blob, withClip } from '../shapes'
+import { type Pt, arc, quad, blob, withClip, normalAt } from '../shapes'
 
 /* -------------------------------------------------------------------- eyes */
 
-/** How much of the eye each lid covers, per style. */
+/** How much of the eye each lid covers, per expression. */
 function lidCover(style: LidStyle): { top: number; bottom: number; tall: number } {
   switch (style) {
     case 'wide': return { top: 0.02, bottom: 0.04, tall: 1.12 }
@@ -30,9 +30,44 @@ function lidCover(style: LidStyle): { top: number; bottom: number; tall: number 
   }
 }
 
-/** Ellipse with flattened lids — the flats are what read as eyelids. */
-function eyeRegion(cx: number, cy: number, rx: number, ry: number, top: number, bottom: number): Pt[] {
-  const pts = arc(cx, cy, rx, ry, 0, Math.PI * 2, 40)
+/**
+ * The eye opening.
+ *
+ * Built from two corners and two lid curves rather than from an ellipse with
+ * its top and bottom clamped off. The corners are what carry the character:
+ * dropping the outer one gives a droop, lifting it gives an upturn, and moving
+ * them together turns a round eye into an almond. Clamping an ellipse can only
+ * ever produce one eye shape with more or less of it hidden.
+ */
+function eyeOutline(
+  cx: number, cy: number, rx: number, ry: number, shape: EyeShape, side: -1 | 1,
+): Pt[] {
+  let topH = ry
+  let botH = ry
+  let outerDrop = 0
+  let innerDrop = 0
+  let widen = 1
+
+  switch (shape) {
+    case 'almond': topH = ry * 0.86; botH = ry * 0.7; widen = 1.12; break
+    case 'narrow': topH = ry * 0.5; botH = ry * 0.42; widen = 1.25; break
+    case 'droop': topH = ry * 0.82; botH = ry * 0.72; outerDrop = ry * 0.46; break
+    case 'upturn': topH = ry * 0.82; botH = ry * 0.72; outerDrop = -ry * 0.42; innerDrop = ry * 0.14; break
+    case 'wide': topH = ry * 1.18; botH = ry * 1.06; break
+    case 'dot': topH = ry * 0.56; botH = ry * 0.56; widen = 0.62; break
+    case 'hooded': topH = ry * 0.58; botH = ry * 0.9; outerDrop = ry * 0.2; break
+    default: break
+  }
+
+  const inner = { x: cx - side * rx * widen, y: cy + innerDrop }
+  const outer = { x: cx + side * rx * widen, y: cy + outerDrop }
+  const top = quad(inner, { x: cx, y: cy - topH * 1.4 }, outer, 11)
+  const bottom = quad(outer, { x: cx, y: cy + botH * 1.3 }, inner, 11)
+  return [...top, ...bottom.slice(1, -1)]
+}
+
+/** Trim an outline to what the lids leave showing. */
+function applyLids(pts: Pt[], cy: number, ry: number, top: number, bottom: number): Pt[] {
   const hiY = cy - ry * (1 - top * 2)
   const loY = cy + ry * (1 - bottom * 2)
   return pts.map((p) => ({ x: p.x, y: clamp(p.y, hiY, loY) }))
@@ -71,7 +106,10 @@ function drawOneEye(
     return
   }
 
-  const region = eyeRegion(cx, cy, rx, ry, cover.top, cover.bottom)
+  const region = applyLids(
+    eyeOutline(cx, cy, rx, ry, f.eyeShape, flip as -1 | 1),
+    cy, ry, cover.top, cover.bottom,
+  )
 
   // Sclera: a whisper of tone so the eye is not a hole in the paper.
   p.hatch(region, {
@@ -137,6 +175,19 @@ function drawOneEye(
     color: ink, alpha: 0.1, width: 1.1, passes: 1, wobble: 0.4, taper: 0.6, lane: lane + 30,
   })
 
+  if (f.eyeShape === 'hooded') {
+    // The fold is the point of a hooded eye; without it the shape just reads
+    // as a small one.
+    p.stroke(
+      quad(
+        { x: cx - flip * rx * 1.25, y: cy - ry * 0.6 },
+        { x: cx, y: cy - ry * 1.5 },
+        { x: cx + flip * rx * 1.3, y: cy - ry * 0.3 }, 12,
+      ),
+      { color: ink, alpha: 0.16, width: 1.4, passes: 1, wobble: 0.5, taper: 0.6, lane: lane + 44 },
+    )
+  }
+
   if (f.lashes) {
     for (let i = 0; i < 3; i++) {
       const a = Math.PI * (1.12 + i * 0.13)
@@ -194,51 +245,179 @@ function drawEyes(s: Scene): void {
 
 /* ------------------------------------------------------------------- brows */
 
+/**
+ * A brow as a ribbon: a spine plus a width that varies along it.
+ *
+ * This is what makes the twelve styles genuinely different shapes rather than
+ * the same arc drawn heavier or lighter. A wedge is thick at the inner end and
+ * gone by the outer; a comma hooks downward; a bar is a flat slab with blunt
+ * ends. Those are different spines and different width functions, not one
+ * curve with a thickness parameter.
+ */
+interface BrowSpec {
+  spine: Pt[]
+  /** Half-thickness at position `t` along the spine, 0..1. */
+  widthAt: (t: number) => number
+  /** Drawn as individual hairs rather than as a solid mass. */
+  hairy: boolean
+  /** Broken into separate marks. */
+  broken?: boolean
+}
+
+function browSpec(
+  style: BrowStyle, cx: number, cy: number, w: number, thick: number, side: -1 | 1, lift: number,
+): BrowSpec {
+  const inner = { x: cx - side * w, y: cy }
+  const outer = { x: cx + side * w, y: cy }
+  const T = thick
+
+  switch (style) {
+    case 'bar':
+      return {
+        spine: [{ x: inner.x, y: cy + lift }, { x: outer.x, y: cy - lift * 0.4 }],
+        widthAt: () => T * 1.5,
+        hairy: false,
+      }
+    case 'wedge':
+      return {
+        spine: quad({ x: inner.x, y: cy + lift + 1 }, { x: cx, y: cy - 1 }, { x: outer.x, y: cy - 2 }, 10),
+        // Thick at the nose end, tapering to nothing at the temple.
+        widthAt: (t) => T * (1.9 - t * 1.7),
+        hairy: false,
+      }
+    case 'comma':
+      return {
+        spine: [
+          ...quad({ x: inner.x, y: cy + 2 }, { x: cx - side * w * 0.2, y: cy - 4 }, { x: cx + side * w * 0.6, y: cy - 2 }, 8),
+          ...quad({ x: cx + side * w * 0.6, y: cy - 2 }, { x: outer.x, y: cy + 1 }, { x: cx + side * w * 0.8, y: cy + 5 }, 6).slice(1),
+        ],
+        widthAt: (t) => T * (1.6 - t * 1.2),
+        hairy: false,
+      }
+    case 'dash':
+      return {
+        spine: [{ x: inner.x, y: cy + lift }, { x: outer.x, y: cy - lift }],
+        widthAt: () => T * 0.9,
+        hairy: true,
+        broken: true,
+      }
+    case 'angled':
+      return {
+        spine: [{ x: inner.x, y: cy + w * 0.32 }, { x: outer.x, y: cy - w * 0.24 }],
+        widthAt: (t) => T * (1.5 - t * 0.7),
+        hairy: false,
+      }
+    case 'unibrow':
+      return {
+        // Runs from the temple all the way past the nose bridge.
+        spine: quad({ x: outer.x, y: cy }, { x: cx - side * w * 0.6, y: cy + 2 }, { x: cx - side * w * 2.4, y: cy + 3 }, 12),
+        widthAt: (t) => T * (1.3 - t * 0.3),
+        hairy: true,
+      }
+    case 'arched':
+      return {
+        spine: quad({ x: inner.x, y: cy + 4 + lift }, { x: cx, y: cy - w * 0.42 }, { x: outer.x, y: cy + 3 - lift }, 12),
+        widthAt: (t) => T * (1 + Math.sin(t * Math.PI) * 0.3),
+        hairy: false,
+      }
+    case 'straight':
+      return {
+        spine: [{ x: inner.x, y: cy + lift }, { x: outer.x, y: cy - lift }],
+        widthAt: () => T * 0.75,
+        hairy: true,
+      }
+    case 'thin':
+      return {
+        spine: quad({ x: inner.x, y: cy + 2 }, { x: cx, y: cy - 3 }, { x: outer.x, y: cy + 1 }, 12),
+        widthAt: () => T * 0.45,
+        hairy: false,
+      }
+    case 'bushy':
+      return {
+        spine: quad({ x: inner.x, y: cy + 3 }, { x: cx, y: cy - 4 }, { x: outer.x, y: cy + 1 }, 12),
+        widthAt: (t) => T * (2.2 - t * 0.5),
+        hairy: true,
+      }
+    case 'worried':
+      return {
+        spine: quad(
+          { x: inner.x, y: cy - w * 0.22 },
+          { x: cx, y: cy + 1 },
+          { x: outer.x, y: cy + w * 0.2 }, 12,
+        ),
+        widthAt: (t) => T * (1.2 - t * 0.4),
+        hairy: true,
+      }
+    default:
+      return {
+        spine: quad({ x: inner.x, y: cy + 2 + lift }, { x: cx, y: cy - 3.5 }, { x: outer.x, y: cy + 1 - lift }, 12),
+        widthAt: (t) => T * (1.1 + Math.sin(t * Math.PI) * 0.25),
+        hairy: true,
+      }
+  }
+}
+
+/** Offset a spine into a closed ribbon using its per-position half-width. */
+function ribbon(spine: readonly Pt[], widthAt: (t: number) => number): Pt[] {
+  const n = spine.length
+  const upper: Pt[] = []
+  const lower: Pt[] = []
+  for (let i = 0; i < n; i++) {
+    const t = n > 1 ? i / (n - 1) : 0
+    const nm = normalAt(spine, i)
+    const half = Math.max(0.35, widthAt(t))
+    const pnt = spine[i]!
+    upper.push({ x: pnt.x + nm.x * half, y: pnt.y + nm.y * half })
+    lower.push({ x: pnt.x - nm.x * half, y: pnt.y - nm.y * half })
+  }
+  return [...upper, ...lower.reverse()]
+}
+
 function drawBrows(s: Scene): void {
   const { p, g } = s
   const f = g.face
   const rng = p.rng
   const col = shade(g.palette.hair, 0.6)
+  const w = f.eyeR * 1.25
 
-  for (const side of [-1, 1] as const) {
+  // A unibrow is one mark across both eyes, so it is drawn once.
+  const sides: (-1 | 1)[] = f.brow === 'unibrow' ? [1] : [-1, 1]
+
+  for (const side of sides) {
     const cx = g.build.cx + turnShift(g) + side * f.eyeSpacing
     const cy = f.eyeY - f.eyeR * (1.4 + f.browLift) + (side > 0 ? f.asym.browDY : 0)
-    const w = f.eyeR * 1.25
     const lift = f.browAngle * side * 6
+    const spec = browSpec(f.brow, cx, cy, w, f.browThick * 1.5, side, lift)
+    const lane = 1000 + (side + 1) * 40
 
-    let path: Pt[]
-    switch (f.brow) {
-      case 'arched':
-        path = quad({ x: cx - w, y: cy + 3 + lift }, { x: cx, y: cy - 5 }, { x: cx + w, y: cy + 2 - lift }, 12)
-        break
-      case 'straight':
-        path = [{ x: cx - w, y: cy + lift }, { x: cx + w, y: cy - lift }]
-        break
-      case 'worried':
-        path = quad(
-          { x: cx - w, y: cy + side * 4 + 2 }, { x: cx, y: cy - 1 }, { x: cx + w, y: cy - side * 4 + 2 }, 12,
+    if (spec.hairy) {
+      // Individual hairs, laid along the spine and fanning slightly.
+      const hairs = f.brow === 'bushy' ? 11 : f.brow === 'dash' ? 5 : 7
+      for (let i = 0; i < hairs; i++) {
+        const t = hairs > 1 ? i / (hairs - 1) : 0.5
+        if (spec.broken && i % 2 === 1) continue
+        const half = spec.widthAt(t)
+        const off = rng.range(-half, half)
+        p.stroke(
+          spec.spine.map((q, k) => {
+            const nm = normalAt(spec.spine, k)
+            return { x: q.x + nm.x * off + rng.gauss(0, 0.5), y: q.y + nm.y * off + rng.gauss(0, 0.5) }
+          }),
+          {
+            color: col, alpha: 0.17, width: 1.4, passes: 1, wobble: 0.45,
+            gaps: spec.broken ? 0.6 : 0.2, taper: 0.65, lane: lane + i,
+          },
         )
-        break
-      case 'thin':
-        path = quad({ x: cx - w * 0.9, y: cy + 2 }, { x: cx, y: cy - 3 }, { x: cx + w * 0.9, y: cy + 1 }, 12)
-        break
-      default:
-        path = quad({ x: cx - w, y: cy + 2 + lift }, { x: cx, y: cy - 3.5 }, { x: cx + w, y: cy + 1 - lift }, 12)
-    }
-
-    const thick = f.browThick * (f.brow === 'bushy' ? 2.1 : f.brow === 'thin' ? 0.55 : 1)
-    const hairs = f.brow === 'bushy' ? 9 : f.brow === 'thin' ? 3 : 6
-    for (let i = 0; i < hairs; i++) {
-      const off = (i / Math.max(1, hairs - 1) - 0.5) * thick * 2.6
-      p.stroke(path.map((q) => ({ x: q.x + rng.gauss(0, 0.6), y: q.y + off + rng.gauss(0, 0.5) })), {
-        color: col,
-        alpha: 0.15,
-        width: 1.3,
-        passes: 1,
-        wobble: 0.4,
-        gaps: 0.2,
-        taper: 0.7,
-        lane: 1000 + (side + 1) * 20 + i,
+      }
+    } else {
+      // A solid mass: hatched across the ribbon, with a firm edge.
+      const shape = ribbon(spec.spine, spec.widthAt)
+      p.hatch(shape, {
+        color: col, alpha: 0.19, spacing: 1.5, angle: 1.4, layers: 2, layerTurn: 44,
+        curve: 0.8, lane: lane + 20,
+      })
+      p.contour(shape, {
+        color: shade(col, 0.8), alpha: 0.13, width: 1.1, passes: 1, wobble: 0.8, lane: lane + 24,
       })
     }
   }

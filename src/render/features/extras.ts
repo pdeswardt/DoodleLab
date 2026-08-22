@@ -25,15 +25,16 @@ function drawHat(s: Scene): void {
   const col = g.extras.hatColor
   const ink = adjust(g.palette.ink, 4, -4)
   const tilt = g.extras.hatTilt
-  // Hats ride on top of the hair, not on the skull.
-  const lift = b.headRy * (0.06 + g.hair.crown * 0.42)
+  // Hats ride on the hair rather than on the skull — but only so far. Tall
+  // hair used to push the hat clear of the head, leaving it floating.
+  const lift = Math.min(b.headRy * 0.3, b.headRy * (0.06 + g.hair.crown * 0.42))
   const topY = b.cy - b.headRy - lift
   const shading = ellipsoidShade(b.cx, topY + 14, b.headRx * 1.1, b.headRy * 0.7, s.lx, s.ly, 1.2)
 
-  const body = (region: Pt[], alpha = 0.12): void => {
+  const body = (region: Pt[], alpha = 0.12, smooth = true): void => {
     // Headwear is opaque cloth. Without a base the hair reads straight through
     // it and the hat looks like a ghost.
-    p.base(region, tint(col, 1.7), 0.96)
+    p.base(region, tint(col, 1.7), 0.96, smooth)
     p.hatch(region, {
       color: col, alpha, spacing: 2.4, angle: 0.7 + tilt, layers: 2, layerTurn: 26,
       lane: 3000, pressure: (x, y) => 0.45 + shading(x, y) * 0.8,
@@ -140,32 +141,71 @@ function drawHat(s: Scene): void {
       break
     }
     case 'crown': {
-      const baseY = topY + b.headRy * 0.5
-      const w = b.headRx * 0.86
-      const pts: Pt[] = [{ x: b.cx - w, y: baseY }]
-      for (let i = 0; i < 4; i++) {
-        const t0 = i / 4
-        const t1 = (i + 0.5) / 4
-        pts.push({ x: b.cx - w + w * 2 * t1, y: baseY - b.headRy * 0.34 })
-        pts.push({ x: b.cx - w + w * 2 * ((t0 + 0.25) + 0.25), y: baseY - b.headRy * 0.08 })
+      // A band that follows the curve of the skull, with points rising from
+      // it. The previous version closed straight across the bottom, which drew
+      // a flat sawtooth strip lying on the head like a paper streamer.
+      const halfW = b.headRx * 0.9
+      const rimY = b.cy - b.headRy * 0.52
+      const rimH = b.headRy * 0.17
+      const peakH = b.headRy * 0.42
+      const spikes = 5
+      // The band dips at the temples, because it is wrapping a round head.
+      const curveAt = (x: number): number =>
+        rimY + ((x - b.cx) / b.headRx) ** 2 * b.headRy * 0.22
+
+      const pts: Pt[] = [
+        { x: b.cx - halfW, y: curveAt(b.cx - halfW) + rimH },
+        { x: b.cx - halfW, y: curveAt(b.cx - halfW) },
+      ]
+      for (let i = 0; i < spikes; i++) {
+        const t = (i + 0.5) / spikes
+        const px = b.cx - halfW + t * halfW * 2
+        const tall = peakH * (0.66 + 0.44 * Math.sin(t * Math.PI))
+        pts.push({ x: px, y: curveAt(px) - tall })
+        if (i < spikes - 1) {
+          const vx = b.cx - halfW + ((i + 1) / spikes) * halfW * 2
+          pts.push({ x: vx, y: curveAt(vx) })
+        }
       }
-      pts.push({ x: b.cx + w, y: baseY })
-      body(pts, 0.13)
+      pts.push({ x: b.cx + halfW, y: curveAt(b.cx + halfW) })
+      pts.push({ x: b.cx + halfW, y: curveAt(b.cx + halfW) + rimH })
+
+      // Straight segments: the points are the whole shape, and smoothing
+      // rounds them into scallops.
+      body(pts, 0.13, false)
+
+      // Jewels along the band.
       for (let i = 0; i < 3; i++) {
-        p.stroke(arc(b.cx - w * 0.6 + i * w * 0.6, baseY - b.headRy * 0.16, 2.4, 2.4, 0, Math.PI * 2, 8), {
-          color: g.palette.accent, alpha: 0.3, width: 2, passes: 2, lane: 3036 + i,
+        const jx = b.cx + (i - 1) * halfW * 0.55
+        p.stroke(arc(jx, curveAt(jx) + rimH * 0.5, 2.6, 2.6, 0, Math.PI * 2, 9), {
+          color: g.palette.accent, alpha: 0.32, width: 2, passes: 2, lane: 3036 + i,
         })
       }
       break
     }
     case 'boat': {
+      // Folded paper: a hull that sits down over the crown, with a peak and a
+      // crease. Three points smoothed into a curve just read as a dart.
+      const halfW = b.headRx * 1.18
+      const sit = topY + b.headRy * 0.42
+      const peak = topY - b.headRy * 0.18
       const pts: Pt[] = [
-        { x: b.cx - b.headRx * 1.2, y: topY + b.headRy * 0.6 },
-        { x: b.cx, y: topY - b.headRy * 0.18 },
-        { x: b.cx + b.headRx * 1.2, y: topY + b.headRy * 0.6 },
+        { x: b.cx - halfW, y: sit },
+        { x: b.cx - halfW * 0.42, y: peak + b.headRy * 0.06 },
+        { x: b.cx, y: peak },
+        { x: b.cx + halfW * 0.42, y: peak + b.headRy * 0.06 },
+        { x: b.cx + halfW, y: sit },
+        { x: b.cx + halfW * 0.62, y: sit + b.headRy * 0.12 },
+        { x: b.cx - halfW * 0.62, y: sit + b.headRy * 0.12 },
       ]
-      body(pts, 0.1)
-      p.stroke([pts[0]!, pts[2]!], { color: ink, alpha: 0.14, width: 1.3, passes: 1, wobble: 0.8, lane: 3038 })
+      body(pts, 0.11, false)
+      // The fold.
+      p.stroke([{ x: b.cx, y: peak + 2 }, { x: b.cx + tilt * 6, y: sit + b.headRy * 0.1 }], {
+        color: ink, alpha: 0.16, width: 1.2, passes: 1, wobble: 0.6, lane: 3038,
+      })
+      p.stroke([{ x: b.cx - halfW * 0.9, y: sit + 1 }, { x: b.cx + halfW * 0.9, y: sit + 1 }], {
+        color: ink, alpha: 0.13, width: 1.2, passes: 1, wobble: 0.8, taper: 0.6, lane: 3039,
+      })
       break
     }
     default:

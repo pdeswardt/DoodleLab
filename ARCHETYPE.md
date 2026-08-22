@@ -102,6 +102,46 @@ something that is no longer the same set of drawings.
 - One-word caption below each figure
 - Warm, low-contrast, desaturated palette with limited saturated accents
 
+### A2. Silhouette families
+
+Variation within an archetype is not only parametric. A population built by
+jittering one head shape and one shoulder line reads as one drawing redrawn,
+however far the numbers are pushed — so the two most visible structures each
+have a set of genuinely different constructions:
+
+**Head** — ten families, each a half-width profile sampled at six heights
+(crown, upper temple, temple, cheek, jaw, chin) plus its own superellipse
+exponents for how flat the sides and crown are: `oval`, `heart`, `blocky`,
+`pear`, `long`, `bulb`, `angular`, `lopsided`, `chinny`, `wide`. Height and
+width are computed independently, so a jowly skull and a long narrow one are
+different shapes rather than the same egg with different multipliers. Family
+choice is weighted by frame, mass and morph; the control points are then
+jittered individually.
+
+**Shoulders** — six constructions: `sloped`, `square`, `round`, `hunched`,
+`narrow`, `uneven`. The control point placement is what separates them — high
+and wide gives square shoulders, low and close gives a soft round slope, and
+pulling it above the neckline gives the shoulders-by-the-ears look that no
+amount of width jitter would produce.
+
+**Eyes** — eight outlines built from corner positions rather than by clamping an
+ellipse: `round`, `almond`, `narrow`, `droop`, `upturn`, `wide`, `dot`,
+`hooded`. Dropping the outer corner gives a droop, lifting it an upturn.
+
+**Brows** — twelve, each a spine plus a width function: `bar`, `wedge`, `comma`,
+`dash`, `angled`, `unibrow`, `arched`, `straight`, `thin`, `bushy`, `worried`,
+`soft`. Thick styles are drawn as a hatched ribbon, thin ones as individual
+hairs.
+
+### A3. Drawing style
+
+One artist filling a sheet still varies. Six per-character parameters govern how
+a figure is *drawn* rather than what it looks like: pressure, nib width (how
+blunt the pencil is, which sets whether hatching fuses into flat tone or stays
+legible as strokes), line looseness, hatch direction, wrist wobble, and degree
+of finish. A slight head turn and variation in how large the figure sits within
+its frame complete the set.
+
 ### B. Constrained variables
 
 Continuous, sampled around a population mean and correlated with each other.
@@ -208,7 +248,13 @@ mood ─> every hue decision on the sheet
 Quirk count is **55 / 30 / 12 / 3** for zero / one / two / three, and quirk
 intensity is **50 / 30 / 17 / 3** across subtle / moderate / strong / extreme.
 The `memorability` control tilts those distributions rather than replacing
-them, so the designed rarity survives at every setting.
+them, and the tilt is anchored at the default setting so that quirk density
+1.00 means literally the designed rarity.
+
+Observed counts on a 256-character sheet land close to the target but a little
+short at two and three quirks — the compatibility rules legitimately cut a
+selection short when a character's remaining options all conflict with what it
+has already been given. That is the constraint system working, not drift.
 
 ---
 

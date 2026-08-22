@@ -185,19 +185,24 @@ function backRegion(s: Scene): Pt[] {
   const b = g.build
   const fall = Math.max(0, h.sides - 0.35)
   const drop = b.headRy * (0.12 + fall * 1.1)
-  return blob(
-    b.cx, b.cy - b.headRy * 0.12 + drop * 0.3,
-    b.headRx * (1 + h.back * 0.09 + fall * 0.12),
-    b.headRy * (1 + h.back * 0.14) + drop * 0.42,
-    p.noise,
-    {
-      n: 2.05 + h.curl * 0.5,
-      wobble: 0.04 + h.curl * 0.09,
-      lumps: 2 + h.curl * 4,
-      lane: 11,
-      steps: 54,
-    },
-  )
+  const grow = 1 + h.back * 0.14 + fall * 0.2
+
+  // Derived from the head's own outline rather than from a fresh ellipse. Now
+  // that skulls are genuinely different shapes, an independent blob reads as a
+  // separate object sitting behind the face instead of as hair on a head.
+  return s.head.map((pt, i) => {
+    const t = i / s.head.length
+    const height = (pt.y - b.cy) / b.headRy
+    const below = clamp(height, 0, 1)
+    // Growth fades to nothing at the chin. Hair that widens uniformly around
+    // the whole skull reads as a hood with a face cut out of it.
+    const chinFade = clamp(1 - below ** 1.4, 0, 1)
+    const lump = 1 + h.curl * 0.07 * p.noise.at(Math.cos(t * 6.28) * 3, Math.sin(t * 6.28) * 3)
+    return {
+      x: b.cx + (pt.x - b.cx) * (1 + (grow - 1) * chinFade) * lump,
+      y: b.cy + (pt.y - b.cy) * (1 + h.back * 0.06 * chinFade) * lump + below * drop,
+    }
+  })
 }
 
 /** The cap sitting on the skull, from the hairline up and out. */
@@ -243,7 +248,11 @@ export function drawHairBack(s: Scene): void {
   const h = g.hair
   if (h.bald && h.back < 0.05) return
 
-  if (h.back > 0.06) {
+  // A mass that barely clears the skull draws as a thin ring around the head —
+  // a halo rather than hair — so it is only drawn once it has real volume or
+  // real length to show.
+  const fallOut = Math.max(0, h.sides - 0.35)
+  if (h.back * 0.14 + fallOut * 0.2 > 0.075 || fallOut > 0.12) {
     const region = backRegion(s)
     fillMass(p, g, region, {
       whorl: { x: g.build.cx + h.part * g.build.headRx * 0.4, y: g.build.cy - g.build.headRy * 0.82 },
@@ -416,32 +425,38 @@ function drawMohawk(s: Scene): void {
   const { p, g } = s
   const b = g.build
   const h = g.hair
-  const height = b.headRy * (0.5 + h.crown * 0.9)
-  const spikes = 5 + Math.round(h.curl * 3)
-  const pts: Pt[] = []
-  const halfW = b.headRx * 0.34
+  const height = b.headRy * (0.45 + h.crown * 0.8)
+  const spikes = 5 + Math.round(h.curl * 4)
+  const halfW = b.headRx * 0.32
 
-  for (let i = 0; i <= spikes; i++) {
-    const t = i / spikes
+  // Individually tapered spikes rather than one zigzag polygon: a single
+  // outline filled in reads as a brush head, not as hair standing up.
+  for (let i = 0; i < spikes; i++) {
+    const t = spikes > 1 ? i / (spikes - 1) : 0.5
     const x = b.cx - halfW + t * halfW * 2
-    const tipY = b.cy - b.headRy - height * (0.65 + 0.45 * Math.sin(t * Math.PI))
-    pts.push({ x: x - 4, y: b.cy - b.headRy * 0.85 })
-    pts.push({ x, y: tipY + p.rng.gauss(0, 4) })
+    const lean = (t - 0.5) * b.headRx * 0.22
+    const tall = height * (0.55 + 0.55 * Math.sin(t * Math.PI)) * p.rng.range(0.85, 1.15)
+    const base = b.cy - b.headRy * 0.72
+    const wide = halfW * 0.34
+    const spike: Pt[] = [
+      { x: x - wide, y: base },
+      { x: x + lean * 0.5, y: base - tall * 0.6 },
+      { x: x + lean, y: base - tall },
+      { x: x + lean * 0.4 + wide * 0.3, y: base - tall * 0.55 },
+      { x: x + wide, y: base + 2 },
+    ]
+    fillMass(p, g, spike, {
+      whorl: { x, y: base + 4 },
+      from: -Math.PI * 0.62 + (t - 0.5) * 0.5,
+      to: -Math.PI * 0.38 + (t - 0.5) * 0.5,
+      count: 7,
+      len: tall * 1.2,
+      curl: h.curl * 0.4,
+      bend: 0,
+      lane: 500 + i * 12,
+      sheen: 0.3,
+    }, s.lx, s.ly)
   }
-  pts.push({ x: b.cx + halfW, y: b.cy - b.headRy * 0.6 })
-  pts.push({ x: b.cx - halfW, y: b.cy - b.headRy * 0.6 })
-
-  fillMass(p, g, pts, {
-    whorl: { x: b.cx, y: b.cy - b.headRy * 0.7 },
-    from: -Math.PI * 0.9,
-    to: -Math.PI * 0.1,
-    count: 22,
-    len: height * 1.4,
-    curl: h.curl * 0.5,
-    bend: 0,
-    lane: 500,
-    sheen: 0.25,
-  }, s.lx, s.ly)
 }
 
 function drawSideLocks(s: Scene): void {

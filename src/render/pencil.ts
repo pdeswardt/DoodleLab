@@ -447,11 +447,11 @@ export class Pencil {
    * of it. Passing a light version of the form's own hue does both, and avoids
    * the pale cut-out look that a flat paper fill gives.
    */
-  base(region: readonly Pt[], ground: Hsl, alpha = 0.97): void {
+  base(region: readonly Pt[], ground: Hsl, alpha = 0.97, smooth = true): void {
     const ctx = this.ctx
     ctx.save()
     ctx.globalCompositeOperation = 'source-over'
-    tracePath(ctx, region, true)
+    tracePath(ctx, region, true, smooth)
     ctx.fillStyle = this.style(ground, alpha)
     ctx.fill()
     ctx.restore()

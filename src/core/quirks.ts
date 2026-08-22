@@ -327,8 +327,11 @@ export function rollQuirks(
   const density = o.density ?? 1
   const maxQuirks = o.maxQuirks ?? 3
 
-  // Propensity 1 = the spec distribution untouched.
-  const propensity = Math.max(0, density * (0.55 + o.memorability * 0.9))
+  // Propensity 1 reproduces the designed distribution exactly. It is anchored
+  // at the default memorability so that "quirk density 1.00" means literally
+  // 55/30/12/3 out of the box, with memorability tilting gently either side of
+  // that rather than quietly suppressing quirks at the default setting.
+  const propensity = Math.max(0, density * (1 + (o.memorability - 0.35) * 1.15))
   const countDist = tilt(COUNT_DISTRIBUTION, propensity)
   let count = rng.fromDistribution(countDist.map((p, i) => [i, p] as const))
   count = Math.min(count, maxQuirks)

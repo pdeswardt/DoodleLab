@@ -207,12 +207,28 @@ export function normalAt(pts: readonly Pt[], i: number): Pt {
   return { x: -dy / len, y: dx / len }
 }
 
-/** Lay a smooth Catmull-Rom path onto the context (no stroke or fill). */
+/**
+ * Lay a path onto the context (no stroke or fill).
+ *
+ * Smooth by default, because almost everything drawn here is organic. Pass
+ * `smooth: false` for shapes whose corners *are* the shape — the points of a
+ * crown, the fold of a paper hat — where Catmull-Rom rounds off the only
+ * feature that identifies them.
+ */
 export function tracePath(
-  ctx: CanvasRenderingContext2D, pts: readonly Pt[], closed = true,
+  ctx: CanvasRenderingContext2D, pts: readonly Pt[], closed = true, smooth = true,
 ): void {
   if (pts.length < 2) return
   const n = pts.length
+
+  if (!smooth) {
+    ctx.beginPath()
+    ctx.moveTo(pts[0]!.x, pts[0]!.y)
+    for (let i = 1; i < n; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y)
+    if (closed) ctx.closePath()
+    return
+  }
+
   const at = (i: number): Pt =>
     closed ? pts[((i % n) + n) % n]! : pts[Math.min(n - 1, Math.max(0, i))]!
 

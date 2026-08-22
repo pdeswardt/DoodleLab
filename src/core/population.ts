@@ -118,7 +118,13 @@ export interface SheetResult {
  */
 export function generateSheet(o: SheetOptions): SheetResult {
   const words = new WordBag()
-  const threshold = o.cloneThreshold ?? 0.62
+  // Calibrated against the feature vector's dimensionality. Adding silhouette
+  // family, head profile and drawing-style axes widened typical distances, so
+  // the old value stopped catching anything; too high and it fires on nearly
+  // every character, churning the sheet and skewing the quirk distribution.
+  // At this value roughly 4% of a 256-sheet trips it, which is about the rate
+  // at which two characters genuinely read as the same person.
+  const threshold = o.cloneThreshold ?? 0.92
   const vectors: number[][] = []
   const characters: Genome[] = []
 

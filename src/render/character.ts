@@ -66,71 +66,115 @@ export function radialFalloff(
 
 /* -------------------------------------------------------------- silhouettes */
 
-export function headOutline(g: Genome, noise: Noise): Pt[] {
-  const b = g.build
-  return blob(b.cx, b.cy, b.headRx, b.headRy, noise, {
-    n: b.headN,
-    wobble: 0.035,
-    lumps: 2.2,
-    lane: 1,
-    steps: 44,
-    // Jaw widens the lower half, crown narrows or broadens the top, cheeks
-    // push out at the sides. Together these make six head shapes feel like
-    // dozens.
-    shape: (t) => {
-      const s = Math.sin(t) // +1 at the chin, -1 at the crown
-      const c = Math.abs(Math.cos(t))
-      const jaw = s > 0 ? 1 + (b.jaw - 1) * s ** 1.4 : 1
-      const crown = s < 0 ? 1 + (b.crown - 1) * (-s) ** 1.6 : 1
-      const cheek = 1 + (b.cheek - 1) * 0.16 * c * (0.5 + 0.5 * s)
-      const chin = s > 0.72 ? 1 - (1 - 1 / b.chin) * 0.5 : 1
-      // A turned head is wider on the near side and compressed on the far one.
-      const turn = 1 + b.turn * 0.1 * Math.cos(t)
-      return jaw * crown * cheek * chin * turn
-    },
-  })
+/**
+ * Sample a head's half-width profile at a given height.
+ *
+ * The six control values sit at heights -1 (crown), -0.6, -0.2, 0.2, 0.6 and
+ * +1 (chin), and are interpolated with a Catmull-Rom spline so the silhouette
+ * stays smooth between them.
+ */
+const PROFILE_POS = [-1, -0.6, -0.2, 0.2, 0.6, 1]
+
+export function sampleProfile(ctrl: readonly number[], h: number): number {
+  const x = clamp(h, -1, 1)
+  let i = 0
+  while (i < PROFILE_POS.length - 2 && x > PROFILE_POS[i + 1]!) i++
+  const t = (x - PROFILE_POS[i]!) / (PROFILE_POS[i + 1]! - PROFILE_POS[i]!)
+  const p0 = ctrl[Math.max(0, i - 1)]!
+  const p1 = ctrl[i]!
+  const p2 = ctrl[i + 1]!
+  const p3 = ctrl[Math.min(ctrl.length - 1, i + 2)]!
+  return 0.5 * (
+    2 * p1 +
+    (-p0 + p2) * t +
+    (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
+    (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t
+  )
 }
 
-export function torsoOutline(g: Genome): Pt[] {
+/**
+ * The head silhouette.
+ *
+ * Built from the family's width-versus-height profile rather than from an
+ * ellipse with modifiers. Height comes from a superellipse term (so a blocky
+ * skull gets a flat crown), width from the profile at that height, and the two
+ * are independent — which is what lets a heart-shaped face, a jowly one and a
+ * long narrow one be genuinely different shapes instead of the same egg.
+ */
+export function headOutline(g: Genome, noise: Noise): Pt[] {
   const b = g.build
-  // The figure is cropped by the frame, exactly as the reference is cropped
-  // mid-chest. The bottom edge sits below the visible area so it never draws
-  // as a line.
-  const bottom = ART.h - 44
-  const sy = b.shoulderY
+  const steps = b.facet ? 26 : 46
+  const invY = 2 / b.headN
+  const invX = 2 / b.headNx
+  const out: Pt[] = []
+
+  for (let i = 0; i < steps; i++) {
+    const t = (i / steps) * Math.PI * 2
+    const ct = Math.cos(t)
+    const st = Math.sin(t)
+
+    // Height first: +1 is the chin, -1 the crown.
+    const hy = Math.sign(st) * Math.abs(st) ** invY
+    // Then the half-width the profile allows at that height.
+    const w = sampleProfile(b.profile, hy)
+    const wx = Math.sign(ct) * Math.abs(ct) ** invX
+    // Lopsidedness, and a little wobble so no outline is machine-perfect.
+    const lean = 1 + b.headAsym * ct
+    const wob = 1 + noise.at(Math.cos(t) * 2.2 + 13, Math.sin(t) * 2.2 + 7) * 0.028
+
+    out.push({
+      x: b.cx + b.headRx * w * wx * lean * wob,
+      y: b.cy + b.headRy * hy * wob,
+    })
+  }
+  return out
+}
+
+/** Where the figure is cropped by the frame. */
+const HEM = ART.h - 44
+
+/**
+ * One shoulder, from the neck out to the tip and down to the crop.
+ *
+ * `side` is -1 or 1. The control point is what distinguishes the styles: high
+ * and far out gives square shoulders, low and close gives a soft round slope,
+ * and pulling it above the neckline gives the hunched, shoulders-by-the-ears
+ * look that no amount of width jitter would ever produce.
+ */
+function shoulderEdge(g: Genome, side: -1 | 1): Pt[] {
+  const b = g.build
   const sw = b.shoulderW
-  const tipY = sy + sw * b.slope * 0.34 + 12
+  const rise = b.shoulderRise[side < 0 ? 0 : 1] * b.headRy
+  const sy = b.shoulderY + rise
+  const tipY = sy + sw * b.slope * 0.34 + 10
   const nw = b.neckW * 1.12
   const ny = b.neckY - 4
 
-  const pts: Pt[] = []
-  pts.push({ x: b.cx - nw, y: ny })
-  pts.push(...quad(
-    { x: b.cx - nw, y: ny },
-    { x: b.cx - sw * 0.46, y: sy + 5 },
-    { x: b.cx - sw * 0.94, y: tipY },
-    10,
-  ).slice(1))
-  pts.push(...quad(
-    { x: b.cx - sw * 0.94, y: tipY },
-    { x: b.cx - sw * 1.06, y: tipY + 26 },
-    { x: b.cx - sw * 1.02, y: bottom },
-    8,
-  ).slice(1))
-  pts.push({ x: b.cx + sw * 1.02, y: bottom })
-  pts.push(...quad(
-    { x: b.cx + sw * 1.02, y: bottom },
-    { x: b.cx + sw * 1.06, y: tipY + 26 },
-    { x: b.cx + sw * 0.94, y: tipY },
-    8,
-  ).slice(1))
-  pts.push(...quad(
-    { x: b.cx + sw * 0.94, y: tipY },
-    { x: b.cx + sw * 0.46, y: sy + 5 },
-    { x: b.cx + nw, y: ny },
-    10,
-  ).slice(1))
-  return pts
+  // Control point placement is the whole personality of the shoulder line.
+  const ctrlX = b.cx + side * sw * (0.3 + b.shoulderRound * 0.18)
+  const ctrlY = sy - b.headRy * (0.16 - b.slope * 0.4)
+
+  return [
+    ...quad(
+      { x: b.cx + side * nw, y: ny },
+      { x: ctrlX, y: ctrlY },
+      { x: b.cx + side * sw * 0.94, y: tipY },
+      12,
+    ),
+    // The turn at the tip: sharp on a square shoulder, generous on a round one.
+    ...quad(
+      { x: b.cx + side * sw * 0.94, y: tipY },
+      { x: b.cx + side * sw * (1.02 + b.shoulderRound * 0.1), y: tipY + 14 + b.shoulderRound * 22 },
+      { x: b.cx + side * sw * 1.02, y: HEM },
+      10,
+    ).slice(1),
+  ]
+}
+
+export function torsoOutline(g: Genome): Pt[] {
+  const left = shoulderEdge(g, -1)
+  const right = shoulderEdge(g, 1)
+  return [...left, ...right.slice().reverse()]
 }
 
 /**
@@ -140,18 +184,7 @@ export function torsoOutline(g: Genome): Pt[] {
  * the frame, which reads as a table edge rather than as a crop.
  */
 export function torsoSideEdges(g: Genome): [Pt[], Pt[]] {
-  const b = g.build
-  const bottom = ART.h - 44
-  const sy = b.shoulderY
-  const sw = b.shoulderW
-  const tipY = sy + sw * b.slope * 0.34 + 12
-  const nw = b.neckW * 1.12
-  const ny = b.neckY - 4
-  const side = (s: number): Pt[] => [
-    ...quad({ x: b.cx + s * nw, y: ny }, { x: b.cx + s * sw * 0.46, y: sy + 5 }, { x: b.cx + s * sw * 0.94, y: tipY }, 10),
-    ...quad({ x: b.cx + s * sw * 0.94, y: tipY }, { x: b.cx + s * sw * 1.06, y: tipY + 26 }, { x: b.cx + s * sw * 1.02, y: bottom }, 8).slice(1),
-  ]
-  return [side(-1), side(1)]
+  return [shoulderEdge(g, -1), shoulderEdge(g, 1)]
 }
 
 function neckOutline(g: Genome): Pt[] {

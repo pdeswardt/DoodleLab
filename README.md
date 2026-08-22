@@ -63,6 +63,12 @@ on the sheet using a feature vector weighted toward what a viewer notices first.
 Too close, and the loud subsystems are rerolled while identity and role are
 held. Natural resemblance survives; twins do not.
 
+**The structures themselves vary, not just their numbers.** Ten head families,
+each with its own width-versus-height profile; six shoulder constructions; eight
+eye outlines built from corner positions; twelve brow shapes, each a spine and a
+width function. A population built by jittering one head shape and one shoulder
+line reads as one drawing redrawn no matter how far the numbers are pushed.
+
 **Every figure is drawn differently, not just built differently.** One artist
 filling a sheet still varies: some figures are pressed harder, some hatched at
 a different angle, some drawn with a looser wrist or a blunter point, some
