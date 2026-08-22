@@ -3,3 +3,9 @@ dist/
 .DS_Store
 *.local
 .vite/
+
+# Local review scratch: rendered samples and the Playwright harness used to
+# capture them. Both are specific to this machine (the harness hardcodes a
+# browser binary path) and the renders are regenerated on every iteration.
+.critique/
+/*.mjs
