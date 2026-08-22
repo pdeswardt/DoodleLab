@@ -251,6 +251,12 @@ function drawEyes(s: Scene): void {
   const { p, g } = s
   const f = g.face
   const rng = p.rng
+  // How far this hand lets the two halves of a face disagree. A trained hand
+  // draws them level and breaks the symmetry deliberately; a doodle puts one
+  // eye higher and larger than the other because that is where the pen went,
+  // and that single fact is most of what makes it read as drawn.
+  const k = p.hand.asym
+  const wonk = p.rng.fork('wonk')
   for (const side of [-1, 1] as const) {
     // Asymmetry is applied here rather than sampled per eye, so the two eyes
     // differ by a fixed, character-specific amount instead of jittering
@@ -258,13 +264,29 @@ function drawEyes(s: Scene): void {
     // The far eye sits closer to the centre line and reads slightly narrower.
     const turn = turnShift(g)
     const near = Math.sign(g.build.turn || 1) === side
-    const cx = g.build.cx + turn + side * f.eyeSpacing * (near ? 1 : 1 - Math.abs(g.build.turn) * 0.18) + rng.gauss(0, 0.4)
-    const cy = f.eyeY + side * f.eyeTilt * f.eyeSpacing + (side > 0 ? f.asym.eyeDY : 0)
-    const r = f.eyeR * (side > 0 ? 1 + f.asym.eyeDR : 1) * (near ? 1 : 1 - Math.abs(g.build.turn) * 0.12)
+    const cx = g.build.cx + turn + side * f.eyeSpacing * (near ? 1 : 1 - Math.abs(g.build.turn) * 0.18)
+      + rng.gauss(0, 0.4) + wonk.gauss(0, (k - 1) * 1.6)
+    const cy = f.eyeY + side * f.eyeTilt * f.eyeSpacing + (side > 0 ? f.asym.eyeDY * k : 0)
+      + wonk.gauss(0, (k - 1) * 1.4)
+    const r = f.eyeR * (side > 0 ? 1 + f.asym.eyeDR * k : 1)
+      * (near ? 1 : 1 - Math.abs(g.build.turn) * 0.12)
+      * (1 + wonk.gauss(0, (k - 1) * 0.09))
     const iris = side < 0 && f.irisAlt ? f.irisAlt : f.iris
     const clouded = f.cloudyEye === side
+    // The two eyes are not the same shape either — one rounder, one narrower,
+    // one lid heavier. Drawing a single geom twice is what kept every face
+    // looking constructed rather than drawn.
+    const e = f.geom.eye
+    const geom = k <= 1.01 ? e : {
+      ...e,
+      topH: e.topH * (1 + wonk.gauss(0, (k - 1) * 0.14)),
+      botH: e.botH * (1 + wonk.gauss(0, (k - 1) * 0.14)),
+      widen: e.widen * (1 + wonk.gauss(0, (k - 1) * 0.1)),
+      outerDrop: e.outerDrop + wonk.gauss(0, (k - 1) * 0.12),
+      lidTop: clamp(e.lidTop + wonk.gauss(0, (k - 1) * 0.07), 0, 1),
+    }
     drawOneEye(
-      p, g, cx, cy, r, f.geom.eye,
+      p, g, cx, cy, r, geom,
       clouded ? hsl(iris.h, 8, Math.max(58, iris.l + 34)) : iris,
       side, 800 + (side + 1) * 60,
     )
@@ -378,7 +400,7 @@ function drawBrows(s: Scene): void {
 
   for (const side of [-1, 1] as const) {
     const cx = g.build.cx + turnShift(g) + side * f.eyeSpacing
-    const cy = f.eyeY - f.eyeR * (1.4 + f.browLift) + (side > 0 ? f.asym.browDY : 0)
+    const cy = f.eyeY - f.eyeR * (1.4 + f.browLift) + (side > 0 ? f.asym.browDY * p.hand.asym : 0)
     const lift = f.browAngle * side * 6
     const spec = browRibbon(bg, cx, cy, w, f.browThick * 1.5, side, lift, reachCap)
     const lane = 1000 + (side + 1) * 40
@@ -440,7 +462,7 @@ function drawNose(s: Scene): void {
   const f = g.face
   const b = g.build
   const ng = f.geom.nose
-  const cx = b.cx + turnShift(g) * 1.35 + f.gazeX * 1.6 + f.asym.noseSkew
+  const cx = b.cx + turnShift(g) * 1.35 + f.gazeX * 1.6 + f.asym.noseSkew * p.hand.asym
   const cy = f.noseY
   const uw = b.headRx * 0.11 * f.noseSize
   const uh = b.headRy * 0.1 * f.noseSize
@@ -616,7 +638,7 @@ function drawMouth(s: Scene): void {
 
   // A mouth that is level to the pixel reads as a decal. The tilt is part of
   // the character's fixed asymmetry, not per-draw noise.
-  const tilt = f.asym.mouthTilt
+  const tilt = f.asym.mouthTilt * p.hand.asym
   const tip = (pts: Pt[]): Pt[] =>
     pts.map((q) => ({ x: q.x, y: q.y + (q.x - cx) * tilt }))
 
@@ -736,16 +758,30 @@ export function drawEars(s: Scene): void {
   // Hair that falls past the ears hides them anyway.
   if (g.hair.sides > 0.85 && !g.hair.bald) return
 
+  // Ear geometry per character rather than one shape scaled: how far it stands
+  // off the skull, how round it is, how low the lobe hangs, whether the lobe is
+  // attached at all. `earTilt` has been generated and plumbed through to this
+  // function for as long as it has existed and was read by nothing.
+  const er = p.rng.fork('ears')
+  const stand = er.range(0.86, 1.05) + (p.hand.asym - 1) * 0.05
+  const round = er.range(0.8, 1.35)
+  const lobe = er.range(0, 1)
+  const attached = er.bool(0.45)
   for (const side of [-1, 1] as const) {
     const grow = f.bigEar === side ? 1.5 : 1
-    const rx = b.headRx * 0.115 * f.earSize * grow
-    const ry = b.headRy * 0.165 * f.earSize * grow
+    const rx = b.headRx * 0.115 * f.earSize * grow * round * (1 + (p.hand.asym - 1) * 0.18)
+    const ry = b.headRy * 0.165 * f.earSize * grow / round ** 0.4 * (1 + (p.hand.asym - 1) * 0.12)
     const near = Math.sign(b.turn || 1) === side
-    const cx = b.cx + side * b.headRx * (near ? 0.9 + Math.abs(b.turn) * 0.05 : 0.9 - Math.abs(b.turn) * 0.14)
-    const cy = f.eyeY + b.headRy * 0.06 + (side > 0 ? f.asym.earDY : 0)
+    const cx = b.cx + side * b.headRx * stand
+      * (near ? 1 + Math.abs(b.turn) * 0.06 : 1 - Math.abs(b.turn) * 0.16)
+    const cy = f.eyeY + b.headRy * 0.06 + (side > 0 ? f.asym.earDY * p.hand.asym : 0)
+      + b.headRy * f.earTilt * 0.06
     const region = blob(cx, cy, rx, ry, p.noise, {
       wobble: 0.1, lumps: 2, lane: 55 + side, steps: 20,
-      shape: (a) => 1 + 0.18 * Math.cos(a) * side,
+      // A hand that draws in pen makes ears as little loops standing clear of
+      // the head, not as flattened ovals hugging it.
+      shape: (a) => 1 + (0.18 + p.hand.ink * 0.24) * Math.cos(a) * side
+        + lobe * 0.16 * Math.max(0, Math.sin(a)),
     })
     p.hatch(region, {
       color: g.palette.skin, alpha: 0.11, spacing: 2.2, angle: 1.1, layers: 2, lane: 1300 + side * 10,
@@ -755,10 +791,16 @@ export function drawEars(s: Scene): void {
       pressure: radialFalloff(cx + side * rx * 0.2, cy + ry * 0.3, rx * 2, 1.2),
     })
     p.contour(region, { color: g.palette.ink, alpha: 0.11, width: 1.1, passes: 1, optional: true, lane: 1308 + side * 10 })
-    // Inner fold.
+    // Inner fold. A detached lobe gets a second short mark under it, which is
+    // most of the difference between the two kinds of ear.
     p.stroke(arc(cx + side * rx * 0.1, cy, rx * 0.45, ry * 0.5, Math.PI * 0.6, Math.PI * 1.7, 10), {
       color: shade(g.palette.skin, 1.4), alpha: 0.14, width: 1.1, passes: 1, taper: 0.6, lane: 1312 + side * 10,
     })
+    if (!attached && lobe > 0.4) {
+      p.stroke(arc(cx, cy + ry * 0.52, rx * 0.6, ry * 0.32, 0.3, Math.PI - 0.3, 8), {
+        color: shade(g.palette.skin, 1.5), alpha: 0.12, width: 1, passes: 1, taper: 0.7, lane: 1316 + side * 10,
+      })
+    }
   }
 }
 

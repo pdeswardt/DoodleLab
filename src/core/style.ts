@@ -1,3 +1,5 @@
+import type { Hsl } from './color'
+
 /**
  * Who is holding the pencil.
  *
@@ -72,6 +74,20 @@ export interface StyleProfile {
    */
   composition: 'bust' | 'head'
   /**
+   * Multiplier on facial asymmetry.
+   *
+   * A trained hand draws a face level and then breaks it deliberately; a
+   * doodle puts one eye higher and larger than the other because that is where
+   * the pen went. Real faces are asymmetric, so this is never below 1.
+   */
+  asym: number
+  /**
+   * How far this hand ages its paper: [hue shift, saturation multiplier,
+   * lightness delta]. Pen on a warm old page is a different object from
+   * coloured pencil on a fresh white sheet.
+   */
+  paperTint: readonly [number, number, number]
+  /**
    * How much the drawing is a pen line rather than pigment.
    *
    * At 0 the contour is a soft cousin of the local colour and the form is
@@ -107,6 +123,8 @@ export const STYLES: Record<DrawStyle, StyleProfile> = {
     exaggeration: 1.25,
     saturation: 1.3,
     composition: 'bust',
+    asym: 1.25,
+    paperTint: [0, 1, 0],
     // Both ends of this axis are coloured pencil. A bold child's outline is
     // still pigment, not pen, so neither end sits anywhere but zero here.
     ink: 0,
@@ -130,6 +148,8 @@ export const STYLES: Record<DrawStyle, StyleProfile> = {
     exaggeration: 0.75,
     saturation: 0.85,
     composition: 'bust',
+    asym: 1,
+    paperTint: [0, 1, 0],
     ink: 0,
     backdrop: 'panel',
   },
@@ -162,6 +182,11 @@ export const STYLES: Record<DrawStyle, StyleProfile> = {
     exaggeration: 2.4,
     saturation: 0.7,
     composition: 'head',
+    // Hard: one eye higher and bigger than the other is most of what makes
+    // these read as drawn rather than constructed.
+    asym: 3.4,
+    // A warm, aged page.
+    paperTint: [-4, 2.6, -5.5],
     ink: 1,
     backdrop: 'patch',
   },
@@ -198,6 +223,12 @@ export function mixStyles(a: StyleProfile, b: StyleProfile, t: number): StylePro
     exaggeration: l(a.exaggeration, b.exaggeration),
     saturation: l(a.saturation, b.saturation),
     composition: t < 0.5 ? a.composition : b.composition,
+    asym: l(a.asym, b.asym),
+    paperTint: [
+      l(a.paperTint[0], b.paperTint[0]),
+      l(a.paperTint[1], b.paperTint[1]),
+      l(a.paperTint[2], b.paperTint[2]),
+    ],
     ink: l(a.ink, b.ink),
     backdrop: t < 0.5 ? a.backdrop : b.backdrop,
   }
@@ -219,4 +250,14 @@ export function resolveStyle(value: string): StyleProfile {
   const named = STYLES[value as DrawStyle]
   if (named) return named
   return styleAt(Number(value))
+}
+
+/** Apply a hand's paper ageing to the mood's stock. */
+export function agePaper(paper: Hsl, style: StyleProfile): Hsl {
+  const [dh, ms, dl] = style.paperTint
+  return {
+    h: paper.h + dh,
+    s: Math.max(0, paper.s * ms),
+    l: Math.max(70, Math.min(100, paper.l + dl)),
+  }
 }

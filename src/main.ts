@@ -21,7 +21,7 @@ import type { Genome } from './core/types'
 import { ART } from './core/types'
 import { drawCharacter } from './render/character'
 import { makePaper } from './render/pencil'
-import { resolveStyle, styleAt, type StyleProfile } from './core/style'
+import { agePaper, resolveStyle, styleAt, type StyleProfile } from './core/style'
 import { SheetView } from './ui/sheet'
 import { exportCharacter, exportSheet } from './ui/exporter'
 
@@ -124,7 +124,9 @@ function draw(): void {
   state.stats = result.stats
   rerollCounts.clear()
 
-  sheet.setPaper(state.mood.paper, state.seed)
+  // The hand ages its own paper: pen on a warm old page is a different object
+  // from coloured pencil on a fresh white sheet.
+  sheet.setPaper(agePaper(state.mood.paper, state.hand), state.seed)
   sheet.render(state.characters, state.cols, state.detail, Number(zoomInput.value), state.hand)
   renderStats(result.stats, performance.now() - t0)
 }
@@ -169,11 +171,11 @@ function paintInspector(g: Genome): void {
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, inspectorCanvas.width, inspectorCanvas.height)
     ctx.drawImage(
-      makePaper(inspectorCanvas.width, inspectorCanvas.height, state.mood.paper, `${g.seed}-${g.index}`),
+      makePaper(inspectorCanvas.width, inspectorCanvas.height, agePaper(state.mood.paper, state.hand), `${g.seed}-${g.index}`),
       0, 0,
     )
     ctx.scale(scale, scale)
-    drawCharacter(ctx, g, { detail: 1.15, caption: true, paperTone: state.mood.paper, style: state.hand })
+    drawCharacter(ctx, g, { detail: 1.15, caption: true, paperTone: agePaper(state.mood.paper, state.hand), style: state.hand })
     ctx.setTransform(1, 0, 0, 1, 0, 0)
   }
 
@@ -327,7 +329,7 @@ function bindBar(): void {
         characters: state.characters,
         cols: state.cols,
         seed: state.seed,
-        paperTone: state.mood.paper,
+        paperTone: agePaper(state.mood.paper, state.hand),
         style: state.hand,
         scale: 1,
         onProgress: (done, total) => { progressBar.style.width = `${(done / total) * 100}%` },
@@ -354,7 +356,7 @@ function bindInspector(): void {
   $('#download-one').addEventListener('click', () => {
     const g = state.selected !== null ? state.characters[state.selected] : null
     if (g) {
-      exportCharacter(g, state.mood.paper, 900, state.hand)
+      exportCharacter(g, agePaper(state.mood.paper, state.hand), 900, state.hand)
       toast('Portrait saved')
     }
   })

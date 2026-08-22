@@ -322,7 +322,9 @@ export class Pencil {
     const baseSpacing = (o.spacing ?? 2.6) * 0.6 / (d * this.density)
     const baseAngle = (o.angle ?? -0.62) + this.angleBias
     const layerTurn = ((o.layerTurn ?? 26) * Math.PI) / 180
-    const alpha = (o.alpha ?? 0.085) * (1 - this.hand.ink * 0.45)
+    // A pen drawing carries almost none of its form in tone, so the hatching
+    // all but disappears at the ink end and the paper does the work.
+    const alpha = (o.alpha ?? 0.085) * (1 - this.hand.ink * 0.68)
     // A hatch line should be about as wide as the gap to its neighbour. Any
     // narrower and the fill reads as a set of lines; any wider and the grain
     // between them is lost. This single relationship is most of the difference
