@@ -544,18 +544,32 @@ function genFace(rng: Rng, id: IdentityDNA, body: BodyDNA, a: Archetype, c: Cont
   // Brow weight tracks the same latent axis as jaw width and facial hair.
   const browThick = clamp(0.85 + id.morph * 0.4 + old * 0.25 + rng.gauss(0, 0.18 * v), 0.45, 1.9)
 
-  // Facial hair is impossible before adulthood, likelier along the morph axis,
-  // and tidier at high grooming.
-  const facialHair: FacialHairStyle = id.age < 17
+  // Facial hair is a two-stage decision, not seven competing weights.
+  //
+  // Written as one weighted list it was impossible to see what the actual rate
+  // was, and the answer turned out to be "about 44% of every adult regardless
+  // of anything else" — which is how characters ended up with lashes, long
+  // hair, an earring and a full beard at the same time. Asking "does this
+  // person have facial hair at all" separately makes the rate legible and lets
+  // it depend properly on the presentation axis.
+  //
+  // `presentation` runs 0 at the low end of the morph axis to 1 at the high
+  // end. Facial hair is essentially absent below the middle and common above
+  // it, which is what makes the cue agree with the jaw, brow and lash cues
+  // rather than contradicting them.
+  const presentation = clamp((id.morph + 0.35) / 1.1, 0, 1)
+  const youngAdult = id.age < 20 ? 0.3 : id.age < 25 ? 0.7 : 1
+  const facialHairChance = presentation ** 1.7 * (0.6 + (1 - id.grooming) * 0.3) * youngAdult
+
+  const facialHair: FacialHairStyle = id.age < 17 || !rng.bool(facialHairChance)
     ? 'none'
     : rng.weighted<FacialHairStyle>([
-      ['none', 8 - id.morph * 3],
-      ['stubble', 1.6 + id.morph * 2 + (1 - id.grooming) * 1.6],
-      ['moustache', 1 + id.morph * 1.4 + old],
-      ['goatee', 0.8 + id.morph * 1.2],
-      ['beard', 0.9 + id.morph * 2 + (1 - id.grooming) * 1.2],
-      ['muttonchops', 0.35 + id.morph * 0.6],
-      ['fluff', 0.6 + Math.max(0, -id.morph)],
+      ['stubble', 2.6 + (1 - id.grooming) * 2],
+      ['beard', 1.6 + presentation * 1.6 + (1 - id.grooming) * 1.2],
+      ['moustache', 1.4 + old * 1.2],
+      ['goatee', 1.1],
+      ['muttonchops', 0.4 + old * 0.5],
+      ['fluff', 0.7 * (1 - presentation)],
     ])
 
   const asymScale = 0.4 + c.variationStrength * 1.3
@@ -580,7 +594,9 @@ function genFace(rng: Rng, id: IdentityDNA, body: BodyDNA, a: Archetype, c: Cont
     eyeY: clamp(0.09 + young * 0.04 + rng.gauss(0, 0.055 * v), -0.04, 0.24),
     eyeTilt: rng.gauss(0, 0.075 * v),
     lid,
-    lashes: rng.bool(0.42 + Math.max(0, -id.morph) * 0.2),
+    // Part of the same cluster: a viewer reads lashes, jaw, brow weight and
+    // facial hair together, so they have to move together.
+    lashes: rng.bool(clamp(0.62 - id.morph * 0.34, 0.1, 0.92)),
     iris: rng.weighted<Triple>([
       [[28, 45, 28], 3], [[30, 38, 20], 3], [[120, 30, 34], 2],
       [[205, 42, 44], 2], [[38, 50, 40], 1.6], [[180, 30, 36], 1],
@@ -754,7 +770,7 @@ function genWardrobe(rng: Rng, id: IdentityDNA, hair: HairDNA, a: Archetype, c: 
     hat,
     hatTilt: rng.gauss(0, 0.13),
     glasses,
-    earring: rng.bool(0.22 + c.memorability * 0.1),
+    earring: rng.bool(clamp(0.3 - id.morph * 0.16, 0.06, 0.5) + c.memorability * 0.08),
     necklace: rng.bool(0.16),
   }
 }

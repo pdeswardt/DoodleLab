@@ -126,13 +126,25 @@ export class Rng {
     return items[Math.floor(this.next01() * items.length)]!
   }
 
-  /** Weighted choice. Weights need not sum to 1. */
+  /**
+   * Weighted choice. Weights need not sum to 1.
+   *
+   * Negative weights are clamped to zero rather than trusted. Call sites build
+   * weights arithmetically — `0.9 + morph * 2` and the like — and such an
+   * expression can go negative at the end of its input range. A negative weight
+   * does not merely make an option unlikely: in a cumulative-sum scan
+   * `r -= w` *increases* `r`, so the scan walks past the item it should have
+   * returned and lands on a later one. That silently corrupts the whole
+   * distribution, and it is invisible until you notice the wrong option
+   * appearing exactly where it should never appear.
+   */
   weighted<T>(entries: readonly WeightedEntry<T>[]): T {
     let total = 0
-    for (const [, w] of entries) total += w
+    for (const [, w] of entries) total += Math.max(0, w)
+    if (total <= 0) return entries[entries.length - 1]![0]
     let r = this.next01() * total
     for (const [value, w] of entries) {
-      r -= w
+      r -= Math.max(0, w)
       if (r <= 0) return value
     }
     return entries[entries.length - 1]![0]

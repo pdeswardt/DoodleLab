@@ -215,6 +215,12 @@ archetype ─┬─> role ─┬─> exposure ──┬─> grime, wear, weather
            ├─> quirk weights        │
            └─> word pool            │
                                     │
+morph ─┬─> jaw width, brow weight
+       ├─> facial-hair likelihood
+       ├─> lash likelihood
+       └─> earring likelihood
+       (these four are read together by a viewer, so they move together)
+
 age ─┬─> greying ─> hair colour     │
      ├─> thinning ─> hairstyle, hair density
      ├─> eye size, ear size, nose size, brow weight
@@ -224,7 +230,6 @@ age ─┬─> greying ─> hair colour     │
                         └─> quirk weights (veteran traits)
 
 frame, mass, muscularity ─> head shape, jaw, cheeks, shoulder span, neck
-morph ─> jaw, brow weight, facial-hair likelihood
 posture ─> shoulder slope, figure tilt
 grooming ─> hairstyle tidiness, stray strands, stubble
 personality ─> quirk weights (meticulous, eccentric, superstitious, sociable)
