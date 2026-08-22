@@ -497,13 +497,19 @@ export class Pencil {
       // factor that tightens hatching would make this ruinously expensive for
       // no visible gain — the marks already overlap heavily.
       spacing: 12 * softness,
+      // Width has to *exceed* the spacing, or the marks tile edge to edge and
+      // the haze becomes a field of bars with visible ends. Overlapping them
+      // heavily at a low alpha is what makes a wash read as a wash.
+      width: 22 * softness,
       width: 9 * softness,
-      alpha: 0.045,
+      alpha: 0.028,
       layers: 2,
       layerTurn: 58,
-      curve: 5,
-      gaps: 0.28,
-      taper: 0.8,
+      curve: 4,
+      gaps: 0.1,
+      // A heavy taper turns each broad mark into a lens with two visible ends;
+      // across a wash that reads as a field of capsules rather than as haze.
+      taper: 0.25,
       hueJitter: 5,
       ...o,
     })

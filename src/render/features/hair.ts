@@ -76,7 +76,10 @@ function fillMass(
   const count = Math.max(6, Math.round(o.count * clamp(p.detail, 0.45, 1.3)))
   const form = ellipsoidShade(b.cx, b.cy, b.w * 0.55, b.h * 0.55, lightX, lightY, 1.3)
 
-  p.base(region, ground(pal.hair, 0.9), 0.94)
+  // A ground, not a plate. Occlusion now removes whatever is behind this mass,
+  // so the fill no longer has to be opaque to hide anything — and at 0.94 it
+  // was flattening the paper out of the hair entirely.
+  p.base(region, ground(pal.hair, 0.9), 0.7)
 
   // Blocked in outside the clip: `hatch` shapes itself to the region, so
   // wrapping it in a mask as well would cost twice for nothing.
@@ -290,6 +293,7 @@ export function drawHairFront(s: Scene): void {
   } else {
     const cap = capRegion(s)
     if (cap.length > 3) {
+      s.hairFrontRegion = cap
       fillMass(p, g, cap, {
         whorl: {
           x: g.build.cx + h.part * g.build.headRx * 0.55,

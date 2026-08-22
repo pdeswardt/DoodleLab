@@ -594,7 +594,7 @@ export function drawGarment(s: Scene): void {
   const pal = g.palette
   const b = g.build
 
-  p.base(torso, ground(pal.garment, 1.15), 0.97)
+  p.base(torso, ground(pal.garment, 1.15), 0.72)
 
   // Local colour, hatched along the drape of the fabric. The direction varies
   // per character — a whole sheet hatched at one angle reads as a print, not

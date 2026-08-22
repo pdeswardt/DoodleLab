@@ -455,17 +455,17 @@ function drawBrows(s: Scene): void {
       // lines the width of the brow, and at the focal point of the face that
       // reads as a barcode rather than as hair.
       const n = spec.spine.length
-      const hairs = f.brow === 'bushy' ? 16 : f.brow === 'dash' ? 6 : 11
+      const hairs = f.brow === 'bushy' ? 12 : f.brow === 'dash' ? 5 : 8
       for (let i = 0; i < hairs; i++) {
-        const t0 = rng.range(0, 0.78)
-        const t1 = Math.min(1, t0 + rng.range(0.14, 0.34))
+        const t0 = rng.range(0, 0.7)
+        const t1 = Math.min(1, t0 + rng.range(0.22, 0.45))
         const i0 = Math.max(0, Math.floor(t0 * (n - 1)))
         const i1 = Math.min(n - 1, Math.ceil(t1 * (n - 1)))
         if (i1 - i0 < 1) continue
         const half = spec.widthAt((t0 + t1) * 0.5)
         const off = rng.range(-half, half)
         // Hairs lie at a slight angle to the ribbon rather than parallel to it.
-        const lean = rng.gauss(0, half * 0.5)
+        const lean = rng.gauss(0, half * 0.18)
         const seg: Pt[] = []
         for (let k = i0; k <= i1; k++) {
           const u = (k - i0) / Math.max(1, i1 - i0)

@@ -12,6 +12,7 @@ import { Noise } from '../core/noise'
 import { adjust, shade, tint, clamp, hsl, type Hsl, ground } from '../core/color'
 import { ART, type Genome } from '../core/genome'
 import { Pencil, applyGrain, makePaper } from './pencil'
+import { LayerStack } from './layers'
 import { STYLES, type StyleProfile } from '../core/style'
 import { blob, quad, arc, inset, tracePath, centroid, type Pt } from './shapes'
 import { drawHairBack, drawHairFront } from './features/hair'
@@ -44,6 +45,10 @@ export interface Scene {
    * face stuck onto a hair blob rather than as a head with hair behind it.
    */
   hairBehind: Pt[] | null
+  /** The hair drawn in front of the face, for occlusion and cast shadow. */
+  hairFrontRegion: Pt[] | null
+  /** Headwear, likewise. */
+  hatRegion: Pt[] | null
   /** Unit vector pointing toward the light. */
   lx: number
   ly: number
@@ -264,7 +269,7 @@ function drawWash(s: Scene): void {
   // sideways across the paper.
   p.wash(region, {
     color: pal.wash,
-    alpha: 0.105,
+    alpha: 0.085,
     angle: 0.34 + w.tilt,
     layers: 2,
     layerTurn: 64,
@@ -288,38 +293,31 @@ function drawWash(s: Scene): void {
     })
   }
 
-  // Feather the boundary.
+  // Soften the boundary with a second, larger, much fainter pass rather than
+  // with explicit edge strokes.
   //
-  // Scrub marks that run *along* the edge, the way you would soften a pencil
-  // wash with the side of the lead. Radial strokes with round caps — which is
-  // what this was — render as a ring of identical capsules, and against the
-  // brighter paper that rosette became the second thing the eye landed on.
+  // Both previous attempts at edge marks failed the same way: taking runs of
+  // consecutive boundary points and stroking them wide produces long capsules,
+  // and across the top of a blob those runs are horizontal — so the background
+  // became a field of bars. A wash softens because it is thin at the edges,
+  // not because something was drawn there.
+  const halo = blob(w.cx, w.cy, w.rx * 1.18, w.ry * 1.16, p.noise, {
+    n: w.n * 0.9,
+    wobble: w.wobble * 1.5,
+    lumps: w.lumps * 1.2,
+    lane: 9,
+    steps: 46,
+  })
+  p.wash(halo, {
+    color: pal.wash,
+    alpha: 0.035,
+    angle: 0.34 + w.tilt + 0.9,
+    layers: 1,
+    softness: 1.5,
+    lane: 44,
+  })
+
   const edgeRng = p.rng
-  const feathers = Math.round(22 * clamp(p.detail, 0.5, 1.2))
-  const n = region.length
-  for (let i = 0; i < feathers; i++) {
-    const at = Math.floor(edgeRng.next() * n)
-    const span = edgeRng.int(3, 9)
-    const drift = edgeRng.range(-7, 5)
-    const arcPts: Pt[] = []
-    for (let k = 0; k <= span; k++) {
-      const a = region[(at + k) % n]!
-      const dx = a.x - w.cx
-      const dy = a.y - w.cy
-      const len = Math.hypot(dx, dy) || 1
-      arcPts.push({ x: a.x + (dx / len) * drift, y: a.y + (dy / len) * drift })
-    }
-    p.stroke(arcPts, {
-      color: edgeRng.bool(0.5) ? pal.wash : pal.washAlt,
-      alpha: 0.035,
-      width: edgeRng.range(5, 12),
-      passes: 1,
-      wobble: 2.2,
-      gaps: 0.45,
-      taper: 0.95,
-      lane: 40 + i,
-    })
-  }
 
   // Optional motes: specks of the accent colour floating in the haze.
   if (w.motes > 0) {
@@ -346,7 +344,7 @@ function drawNeck(s: Scene): void {
   const { p, g } = s
   const pal = g.palette
   const neck = neckOutline(g)
-  p.base(neck, ground(pal.skin), 0.97)
+  p.base(neck, ground(pal.skin), 0.68)
 
   p.hatch(neck, {
     color: pal.skin,
@@ -388,10 +386,12 @@ function drawHead(s: Scene): void {
   const pal = g.palette
   const b = g.build
 
-  // 0. A pale ground in the skin's own hue. This both stops the hair and the
-  //    wash showing through the face and gives the hatching something warmer
-  //    than bare paper to sit on.
-  p.base(head, ground(pal.skin), 0.97)
+  // 0. A pale ground in the skin's own hue — a wash of local colour to build
+  //    the darks on, which is how the medium is actually worked. It no longer
+  //    has to be opaque: occlusion has already removed the hair and the
+  //    background from inside this silhouette, so the plate that made a face
+  //    read as a sticker is gone.
+  p.base(head, ground(pal.skin), 0.72)
 
   // 1. Local colour. Two layers at a shallow angle difference give the paper
   //    something to hold without reading as texture in its own right.
@@ -411,7 +411,7 @@ function drawHead(s: Scene): void {
   // 2. Form shadow.
   p.hatch(head, {
     color: shade(pal.skin, 1),
-    alpha: 0.08 * p.hand.modelling,
+    alpha: 0.1 * p.hand.modelling,
     spacing: 2.4,
     angle: -0.5,
     layers: 2,
@@ -452,11 +452,8 @@ function drawHead(s: Scene): void {
     },
   })
 
-  // 5. Outline, heaviest where the form turns away — and absent where the hair
-  //    behind the head is already covering that edge. A closed keyline drawn
-  //    round the whole skull over the back hair reads as a face stuck onto a
-  //    hair blob rather than as a head with hair behind it.
-  //    The one mark in the drawing allowed to be this heavy.
+  // 5. Outline, heaviest where the form turns away. The one mark in the
+  //    drawing allowed to be this heavy.
   p.contour(head, {
     color: pal.contourInk,
     alpha: 0.24,
@@ -465,7 +462,6 @@ function drawHead(s: Scene): void {
     wobble: 0.6,
     heavyAngle: Math.atan2(-s.ly, -s.lx),
     heavyAmount: 0.55,
-    hiddenIn: s.hairBehind ?? undefined,
     lane: 116,
   })
 }
@@ -492,70 +488,124 @@ export function drawCharacter(
   ctx: CanvasRenderingContext2D, g: Genome, o: DrawOptions = {},
 ): void {
   const detail = o.detail ?? 1
+  const style = o.style ?? STYLES.adult
   const rng = new Rng(`${g.seed}::draw::${g.index}`)
   const noise = new Noise(rng.fork('noise'))
-  const p = new Pencil(ctx, rng, noise, detail)
-  // Style and individual compose in one place, so neither can clobber the
-  // other: the sheet has one hand, and each character deviates from it.
-  p.useStyle(o.style ?? STYLES.adult, g.build)
 
   const head = headOutline(g, noise)
   const torso = torsoOutline(g)
   const lx = Math.cos(g.lightAngle)
   const ly = Math.sin(g.lightAngle)
 
+  // Each part group gets its own buffer. Nothing is painted over anything;
+  // nearer parts erase themselves out of the buffers behind, so every mark
+  // ends up sitting on bare paper.
+  const scale = Math.abs(ctx.getTransform().a) || 1
+  const stack = new LayerStack(
+    ['wash', 'body', 'hairBack', 'head', 'hairFront', 'extras'],
+    ART.w, ART.h, scale,
+  )
+
+  const pencilFor = (name: string): Pencil => {
+    const lp = new Pencil(stack.ctx(name), rng, noise, detail)
+    // Style and individual compose in one place, so neither can clobber the
+    // other: the sheet has one hand, and each character deviates from it.
+    lp.useStyle(style, g.build)
+    return lp
+  }
+  const pens = {
+    wash: pencilFor('wash'),
+    body: pencilFor('body'),
+    hairBack: pencilFor('hairBack'),
+    head: pencilFor('head'),
+    hairFront: pencilFor('hairFront'),
+    extras: pencilFor('extras'),
+  }
+
+  // The whole-figure tilt and framing have to be applied inside every buffer,
+  // since each is its own coordinate space.
+  for (const name of ['wash', 'body', 'hairBack', 'head', 'hairFront', 'extras']) {
+    const lctx = stack.ctx(name)
+    lctx.translate(g.build.cx, g.build.cy)
+    lctx.rotate(g.build.tilt)
+    lctx.scale(g.build.frameScale, g.build.frameScale)
+    lctx.translate(-g.build.cx, -g.build.cy)
+  }
+
   const s: Scene = {
-    p, g, head, torso, lx, ly,
+    p: pens.wash, g, head, torso, lx, ly,
     headCentre: centroid(head),
     hairBehind: null,
+    hairFrontRegion: null,
+    hatRegion: null,
     paper: o.paperTone ?? hsl(42, 32, 96),
     headShade: ellipsoidShade(g.build.cx, g.build.cy - g.build.headRy * 0.08, g.build.headRx, g.build.headRy, lx, ly),
   }
 
-  ctx.save()
-  // Multiply is how layered pigment actually behaves: each pass can only
-  // darken what is beneath it.
-  ctx.globalCompositeOperation = 'multiply'
-
-  // A slight whole-figure tilt, as if the page were turned a little, and a
-  // little variation in how big the figure is drawn on the page.
-  ctx.translate(g.build.cx, g.build.cy)
-  ctx.rotate(g.build.tilt)
-  ctx.scale(g.build.frameScale, g.build.frameScale)
-  ctx.translate(-g.build.cx, -g.build.cy)
-
   // Depth order, back to front. Hair sits behind the head but in *front* of the
   // shoulders, which is what lets long hair fall over a collar.
+  s.p = pens.wash
   drawWash(s)
+
+  s.p = pens.body
   drawExtrasBehind(s)
   drawNeck(s)
   // Mark budget: the face carries the drawing. Left flat, the coat's pattern,
   // pocket, buttons, patches and folds add up to more discrete marks than the
   // head has, and the eye goes to the shirt.
-  p.density = 1 - (o.style ?? STYLES.adult).hierarchy * 0.42
+  s.p.density = 1 - style.hierarchy * 0.42
   drawGarment(s)
-  p.density = 1
+  s.p.density = 1
+
+  s.p = pens.hairBack
   drawHairBack(s)
+
+  s.p = pens.head
   // Ears go under the head so the skull overlaps them, which is what stops the
   // join reading as two shapes butted together.
   drawEars(s)
   drawHead(s)
   drawFace(s)
-  p.density = 1 - (o.style ?? STYLES.adult).hierarchy * 0.2
+
+  s.p = pens.hairFront
+  s.p.density = 1 - style.hierarchy * 0.2
   drawHairFront(s)
-  p.density = 1
+  s.p.density = 1
+
+  s.p = pens.extras
   drawExtrasFront(s)
   drawQuirk(s)
 
-  ctx.restore()
+  // Occlusion. Each region is removed from everything behind it, so the head
+  // is not a plate laid over the hair — the hair simply is not there where the
+  // head is.
+  stack.occlude('body', torso)
+  if (s.hairBehind) stack.occlude('hairBack', s.hairBehind)
+  stack.occlude('head', head)
+  if (s.hairFrontRegion) stack.occlude('hairFront', s.hairFrontRegion)
+  if (s.hatRegion) stack.occlude('extras', s.hatRegion)
 
-  if (o.caption) drawCaption(ctx, g, p)
+  // Cast shadow, now that the drawing knows what is in front of what. Offsets
+  // follow the sheet's key light; these are the marks that put the head on the
+  // body instead of in front of it.
+  const dropX = -lx * g.build.headRx * 0.1
+  const dropY = -ly * g.build.headRy * 0.1
+  const soft = Math.max(2, g.build.headRx * 0.12 * scale)
+  const strength = 0.16 * style.modelling
+  stack.castShadow('body', head, dropX, Math.abs(dropY) + g.build.headRy * 0.06, soft, strength)
+  if (s.hairFrontRegion) {
+    stack.castShadow('head', s.hairFrontRegion, dropX * 0.5, g.build.headRy * 0.045, soft * 0.7, strength * 0.9)
+  }
+  if (s.hatRegion) {
+    stack.castShadow('head', s.hatRegion, dropX * 0.5, g.build.headRy * 0.05, soft * 0.8, strength * 1.1)
+  }
+
+  stack.flush(ctx, ART.w, ART.h)
+
+  if (o.caption) drawCaption(ctx, g, pens.head)
 
   // A final tooth pass over the finished cell. Every render path lays paper
   // down first, so the canvas is opaque here and `multiply` behaves.
-  // Light touch. At 0.5 the tooth pulled even untouched paper down to ~233,
-  // so the drawing had no whites anywhere — and a picture with no white and no
-  // black lives in a mid-grey band and reads as a child's.
   applyGrain(ctx, ART.w, ART.h, 0.12, g.index)
 }
 
