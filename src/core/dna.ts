@@ -668,19 +668,19 @@ type NoseNumeric =
   | 'nostril' | 'contour' | 'shadow'
 
 const NOSE_RANGES: Record<NoseNumeric, Range> = {
-  width: [0.72, 1.75],
-  tipH: [0.6, 1.45],
+  width: [0.8, 1.75],
+  tipH: [0.66, 1.45],
   tipDrop: [-0.3, 0.5],
   bridge: [1, 3.6],
   hook: [0.2, 0.95],
   upturn: [0.25, 1],
   nostril: [0.5, 1.35],
   contour: [0.1, 1],
-  shadow: [0.35, 1],
+  shadow: [0.5, 1],
 }
 
 const NOSE_FAMILIES: Record<NoseStyle, Partial<Record<NoseNumeric, Range>>> = {
-  button: { width: [0.72, 1.05], tipH: [0.68, 1.05], bridge: [1, 1.9] },
+  button: { width: [0.86, 1.16], tipH: [0.82, 1.15], bridge: [1, 1.9] },
   beak: { hook: [0.5, 0.95], bridge: [2.2, 3.6], width: [0.7, 1.05], tipDrop: [0.12, 0.5], contour: [0.5, 1] },
   upturned: { upturn: [0.55, 1], tipDrop: [-0.35, 0.02], width: [0.85, 1.3] },
   broad: { width: [1.3, 1.8], tipH: [0.85, 1.25], nostril: [0.95, 1.4] },
@@ -738,7 +738,10 @@ function genMouthGeom(rng: Rng, style: MouthStyle, c: Controls): MouthGeom {
     // Teeth need somewhere to be. Rolled independently of the opening they
     // turned up on closed mouths, where they read as a smear on the lip line.
     teeth: open > 0.12 ? maybe('teeth', 0.3) : 0,
-    pucker: pick('pucker'),
+    // Zero-inflated, or every mouth on the sheet is drawn in toward the middle
+    // and the whole population ends up pursed. Only the families that need a
+    // narrow mouth — a pucker, a whistle, a pout — force one.
+    pucker: maybe('pucker', 0.26),
     skew: pick('skew'),
   }
 }

@@ -13,7 +13,7 @@ import type { BrowGeom, EyeGeom, Genome } from '../../core/genome'
 import type { Scene } from '../character'
 import { radialFalloff, ellipsoidShade } from '../character'
 import type { Pencil } from '../pencil'
-import { type Pt, arc, quad, blob, withClip, normalAt } from '../shapes'
+import { type Pt, arc, quad, blob, bounds, withClip, normalAt } from '../shapes'
 
 /* -------------------------------------------------------------------- eyes */
 
@@ -490,7 +490,7 @@ function drawNose(s: Scene): void {
   const lit = ellipsoidShade(cx, tipY, rx, ry, s.lx, s.ly, 1.3)
   p.hatch(shape, {
     color: g.palette.noseAccent,
-    alpha: 0.1 + ng.shadow * 0.09,
+    alpha: 0.12 + ng.shadow * 0.07,
     spacing: 1.6,
     angle: 0.75,
     layers: 2,
@@ -501,7 +501,7 @@ function drawNose(s: Scene): void {
   // The core shadow: a crescent inside the form, not a rim.
   p.hatch(shape, {
     color: shade(g.palette.noseAccent, 1.6),
-    alpha: 0.16 * ng.shadow,
+    alpha: 0.06 + 0.11 * ng.shadow,
     spacing: 1.8,
     angle: 1.3,
     layers: 1,
@@ -539,7 +539,9 @@ function drawNose(s: Scene): void {
 
   // The profile. One line from the brow down the ridge to the tip, bowing
   // forward with the hook — this is the whole of what made a beak a beak.
-  if (ng.bridge > 0.2 && ng.contour > 0.25) {
+  // Only a long ridge earns it: drawn on every nose it is a vertical rule down
+  // the middle of every face on the sheet.
+  if (ng.bridge > 2.1 && ng.contour > 0.45) {
     p.stroke(
       quad(
         { x: cx - fwd * rx * 0.28, y: bridgeTop },
@@ -559,25 +561,28 @@ function drawNose(s: Scene): void {
   if (ng.upturn > 0.05) {
     p.stroke(
       quad(
-        { x: cx - rx * 1.05, y: tipY + ry * 0.1 },
+        { x: cx - rx * 0.9, y: tipY + ry * 0.1 },
         { x: cx - rx * 0.15, y: tipY + ry * (1.1 - ng.upturn * 2.2) },
-        { x: cx + rx * 1.05, y: tipY - ry * 0.3 },
+        { x: cx + rx * 0.9, y: tipY - ry * 0.3 },
         12,
       ),
       {
-        color: ink, alpha: 0.08 + ng.upturn * 0.14, width: 1.5, passes: 2,
-        wobble: 0.3, taper: 0.45, lane: 1116,
+        color: ink, alpha: 0.05 + ng.upturn * 0.13, width: 1.3, passes: 2,
+        wobble: 0.3, taper: 0.5, lane: 1116,
       },
     )
   }
 
-  // Outlined only by an untrained hand, or a nose that is meant to be graphic.
+  // Outlined only by an untrained hand — a lined nose is the loudest tell of
+  // one, so `contour` sets how heavy that line is, never whether a trained
+  // hand draws it at all.
   p.contour(shape, {
-    color: ink, alpha: 0.04 + ng.contour * 0.16, width: 1.2, passes: 1,
-    heavyAngle: Math.PI * 0.55, heavyAmount: 0.5, optional: ng.contour < 0.7, lane: 1126,
+    color: ink, alpha: 0.04 + ng.contour * 0.12, width: 1.2, passes: 1,
+    heavyAngle: Math.PI * 0.55, heavyAmount: 0.5, optional: true, lane: 1126,
   })
 
-  // Nostrils, on all but the daintiest noses.
+  // Nostrils. Absent entirely on a dainty nose, which is a bigger difference
+  // between two faces than any amount of nostril is.
   if (ng.nostril > 0.05) {
     for (const side of [-1, 1] as const) {
       p.stroke(
@@ -627,7 +632,7 @@ function drawMouth(s: Scene): void {
   // height; an "ohh" is a puckered pair of corners with a tall one. The eight
   // hardcoded mouths were eight unrelated drawings, so a grin and a toothy
   // grin shared nothing and two smiles shared everything.
-  const half = w * (1 - m.pucker * 0.7)
+  const half = w * (0.92 - m.pucker * 0.62)
   const corner = m.lift * w * 0.18
   const left = { x: cx - half, y: cy - corner - m.skew * w * 0.1 }
   const right = { x: cx + half, y: cy - corner + m.skew * w * 0.1 }
@@ -852,11 +857,15 @@ function drawFacialHair(s: Scene): void {
     })
 
     // Grain where it is short, strands where it is long. Both scale with
-    // density, so a sparse beard is see-through rather than a smaller one.
-    const grains = Math.round(90 * bg.density * (1 - len))
+    // density, so a sparse beard is see-through rather than a smaller one, and
+    // both scale with the area they cover — a fixed count spread over a
+    // sideburn is a solid block, and over a full jaw it is a dusting.
+    const bb = bounds(region)
+    const area = (bb.w * bb.h) / (b.headRx * b.headRy)
+    const grains = Math.round(70 * area * bg.density * (1 - len))
     if (grains > 4) withClip(p.ctx, [s.head], () => p.fleck(region, col, grains, 0.5))
 
-    const strands = Math.round(len * bg.density * 24)
+    const strands = Math.round(len * bg.density * 20 * area)
     const mid = { x: b.cx, y: b.cy + b.headRy * 0.6 }
     for (let i = 0; i < strands; i++) {
       const q = region[rng.int(0, region.length - 1)]!
