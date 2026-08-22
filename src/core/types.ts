@@ -38,6 +38,45 @@ export type HeadFamily =
 /** How the shoulders are built. The single biggest silhouette cue in a bust. */
 export type ShoulderStyle =
   | 'sloped' | 'square' | 'round' | 'hunched' | 'narrow' | 'uneven'
+/**
+ * The shoulders as parameters.
+ *
+ * Six literal control-point sets, of which the renderer read three fields and
+ * invented the rest from its own constants — so the control point that decides
+ * the whole personality of a shoulder line moved across 13% of shoulder width
+ * over an entire population. Every bust on a sheet was the same shoulder at a
+ * different span, which a viewer reads before any trait registers.
+ */
+export interface ShoulderSpec {
+  id: ShoulderStyle
+  /** Span multiplier on the base shoulder width. */
+  width: number
+  /** How far the tip falls below the shoulder line, x shoulder half-width. */
+  tipDrop: number
+  /** Where the control point sits along the neck-to-tip run, 0..1. */
+  ctrlX: number
+  /**
+   * Control point height against the shoulder line, x head half-height.
+   * Negative lifts it toward the ears, which is what a hunch actually is.
+   */
+  ctrlY: number
+  /** How high the neck-to-shoulder ramp starts — the trapezius. */
+  trapRise: number
+  /** 0 = a concave ramp, 1 = a convex one. The real sloped-to-square axis. */
+  trapCurve: number
+  /** 0 = a sharp corner at the tip, 1 = a generous turn. */
+  tipTurn: number
+  /** How far that turn reaches down, in art units. */
+  tipReach: number
+  /** Below 1 the torso narrows toward the crop, above 1 it flares. */
+  sideTaper: number
+  /** Bow of the side edge: a barrelled torso against a straight one. */
+  sideBow: number
+  /** Per-side lift. An uneven pair is its own style, but everyone has some. */
+  riseL: number
+  riseR: number
+}
+
 export type CollarStyle =
   | 'buttonup' | 'crew' | 'turtleneck' | 'vneck' | 'overalls'
   | 'apron' | 'robe' | 'hoodie' | 'sailor' | 'ruffle'
@@ -431,9 +470,9 @@ export interface Build {
   /** Draw the outline with fewer, harder samples — a faceted skull. */
   facet: boolean
   shoulderStyle: ShoulderStyle
+  shoulderSpec: ShoulderSpec
   /** Per-side shoulder height offsets. */
   shoulderRise: [number, number]
-  shoulderRound: number
   jaw: number
   crown: number
   cheek: number

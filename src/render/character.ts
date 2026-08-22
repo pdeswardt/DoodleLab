@@ -185,37 +185,59 @@ export function hemFor(g: Genome): number {
 /**
  * One shoulder, from the neck out to the tip and down to the crop.
  *
- * `side` is -1 or 1. The control point is what distinguishes the styles: high
- * and far out gives square shoulders, low and close gives a soft round slope,
- * and pulling it above the neckline gives the hunched, shoulders-by-the-ears
- * look that no amount of width jitter would ever produce.
+ * `side` is -1 or 1. Every number here comes from `ShoulderSpec`. It used to
+ * come from four literals invented in this function while three fields of the
+ * genome's own shoulder table went unread — so the control point that decides
+ * the entire personality of a shoulder line travelled across 13% of shoulder
+ * width over a whole population, and every bust was the same line at a
+ * different span.
  */
 function shoulderEdge(g: Genome, side: -1 | 1): Pt[] {
   const b = g.build
+  const sp = b.shoulderSpec
   const sw = b.shoulderW
   const rise = b.shoulderRise[side < 0 ? 0 : 1] * b.headRy
-  const sy = b.shoulderY + rise
-  const tipY = sy + sw * b.slope * 0.34 + 10
+  // The trapezius: where the neck-to-shoulder ramp starts. A high one is the
+  // difference between a swimmer and a scholar, and it was not expressible.
+  const sy = b.shoulderY + rise - b.headRy * sp.trapRise
+  const tipX = b.cx + side * sw * 0.94
+  const tipY = sy + sw * sp.tipDrop * 0.34 + 10
   const nw = b.neckW * 1.12
   const ny = b.neckY - 4
+  const neck = { x: b.cx + side * nw, y: ny }
 
-  // Control point placement is the whole personality of the shoulder line.
-  const ctrlX = b.cx + side * sw * (0.3 + b.shoulderRound * 0.18)
-  const ctrlY = sy - b.headRy * (0.16 - b.slope * 0.4)
+  // The control point, placed along the neck-to-tip run rather than at a fixed
+  // fraction of shoulder width. `trapCurve` decides which side of the straight
+  // line it falls: below it the ramp is concave and the shoulder slopes, above
+  // it the ramp is convex and the shoulder squares off.
+  const runX = tipX - neck.x
+  const runY = tipY - neck.y
+  const ctrl = {
+    x: neck.x + runX * sp.ctrlX - runY * (sp.trapCurve - 0.5) * 0.22 * side,
+    y: sy - b.headRy * sp.ctrlY + runX * (sp.trapCurve - 0.5) * 0.16 * side,
+  }
+
+  // The side edge below the tip, tapering or flaring toward the crop with a
+  // bow across it — a barrelled torso against a straight one.
+  const hem = hemFor(g)
+  const footX = b.cx + side * sw * 0.93 * sp.sideTaper
+  const bowX = b.cx + side * sw * (0.94 + sp.sideBow)
 
   return [
+    ...quad(neck, ctrl, { x: tipX, y: tipY }, 12),
+    // The turn at the tip: a sharp corner on a square shoulder, a generous
+    // sweep on a round one.
     ...quad(
-      { x: b.cx + side * nw, y: ny },
-      { x: ctrlX, y: ctrlY },
-      { x: b.cx + side * sw * 0.94, y: tipY },
-      12,
-    ),
-    // The turn at the tip: sharp on a square shoulder, generous on a round one.
-    ...quad(
-      { x: b.cx + side * sw * 0.94, y: tipY },
-      { x: b.cx + side * sw * (0.95 + b.shoulderRound * 0.08), y: tipY + 14 + b.shoulderRound * 22 },
-      { x: b.cx + side * sw * 0.93, y: hemFor(g) },
+      { x: tipX, y: tipY },
+      { x: b.cx + side * sw * (0.95 + sp.tipTurn * 0.09), y: tipY + sp.tipReach },
+      { x: bowX, y: tipY + sp.tipReach + (hem - tipY - sp.tipReach) * 0.45 },
       10,
+    ).slice(1),
+    ...quad(
+      { x: bowX, y: tipY + sp.tipReach + (hem - tipY - sp.tipReach) * 0.45 },
+      { x: bowX, y: hem - (hem - tipY) * 0.2 },
+      { x: footX, y: hem },
+      8,
     ).slice(1),
   ]
 }

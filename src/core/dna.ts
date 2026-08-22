@@ -27,7 +27,7 @@ import type {
   BeardGeom, BrowGeom, BrowStyle, CollarSpec, CollarStyle, EyeGeom, EyeShape,
   FaceGeom, FacialHairStyle, GlassesSpec, GlassesStyle, HatSpec, HatStyle,
   HatTrim, HeadFamily, HeadShape, LidStyle, MouthGeom, MouthStyle, NoseGeom,
-  NoseStyle, PatternStyle, ShoulderStyle,
+  NoseStyle, PatternStyle, ShoulderSpec, ShoulderStyle,
 } from './types'
 
 /* ------------------------------------------------------------- subsystems */
@@ -129,7 +129,7 @@ export interface BodyDNA {
   facet: boolean
   shoulderStyle: ShoulderStyle
   shoulderRise: [number, number]
-  shoulderRound: number
+  shoulderSpec: ShoulderSpec
   headScale: number
   /** Suggestion of a three-quarter turn, -1 (their right) .. 1. */
   turn: number
@@ -395,22 +395,73 @@ const HEAD_FAMILIES: Record<HeadFamily, {
   wide: { profile: [0.96, 1.06, 1.14, 1.10, 0.98, 0.84], nx: 2.2, ny: 2.1, ratio: 0.86 },
 }
 
-/** Shoulder constructions. A bust is mostly silhouette, and this is most of it. */
-export const SHOULDER_STYLES: Record<ShoulderStyle, {
-  tipDrop: number
-  ctrlX: number
-  ctrlY: number
-  round: number
-  width: number
-  rise: number
-}> = {
-  sloped: { tipDrop: 0.42, ctrlX: 0.42, ctrlY: 0.12, round: 0.5, width: 1, rise: 0 },
-  square: { tipDrop: 0.08, ctrlX: 0.64, ctrlY: -0.08, round: 0.18, width: 1.06, rise: 0 },
-  round: { tipDrop: 0.26, ctrlX: 0.33, ctrlY: 0.24, round: 0.95, width: 0.98, rise: 0 },
-  hunched: { tipDrop: 0.04, ctrlX: 0.3, ctrlY: -0.2, round: 0.75, width: 0.9, rise: -0.16 },
-  narrow: { tipDrop: 0.36, ctrlX: 0.38, ctrlY: 0.14, round: 0.62, width: 0.76, rise: 0.05 },
-  uneven: { tipDrop: 0.3, ctrlX: 0.44, ctrlY: 0.08, round: 0.55, width: 1, rise: 0 },
+/** The numeric fields of a shoulder, all drawn from ranges. */
+type ShoulderNumeric =
+  | 'width' | 'tipDrop' | 'ctrlX' | 'ctrlY' | 'trapRise' | 'trapCurve'
+  | 'tipTurn' | 'tipReach' | 'sideTaper' | 'sideBow'
+
+/**
+ * The whole space a shoulder can occupy. A bust is mostly silhouette and this
+ * is most of it, so the bounds are deliberately wide.
+ */
+const SHOULDER_RANGES: Record<ShoulderNumeric, Range> = {
+  width: [0.72, 1.18],
+  tipDrop: [0.02, 0.58],
+  ctrlX: [0.24, 0.82],
+  ctrlY: [-0.3, 0.34],
+  trapRise: [0, 0.3],
+  trapCurve: [0, 1],
+  tipTurn: [0.05, 1],
+  tipReach: [8, 42],
+  sideTaper: [0.82, 1.12],
+  sideBow: [-0.12, 0.14],
 }
+
+/**
+ * A family pins only what makes it that family. `square` is a high, far-out
+ * control point and a sharp corner; `hunched` is a control point lifted above
+ * the neckline. How wide, how far the tip reaches, how the torso tapers below
+ * it and how much the side edge bows are free in every one of them.
+ */
+const SHOULDER_FAMILIES: Record<ShoulderStyle, Partial<Record<ShoulderNumeric, Range>>> = {
+  sloped: { tipDrop: [0.3, 0.58], ctrlY: [0.04, 0.24], trapCurve: [0, 0.42] },
+  square: { tipDrop: [0.02, 0.16], ctrlX: [0.54, 0.82], ctrlY: [-0.16, 0.02], tipTurn: [0.05, 0.34] },
+  round: { tipDrop: [0.16, 0.38], ctrlY: [0.14, 0.34], tipTurn: [0.66, 1] },
+  hunched: { ctrlY: [-0.3, -0.08], tipDrop: [0.02, 0.18], trapRise: [0.12, 0.3] },
+  narrow: { width: [0.72, 0.88] },
+  uneven: {},
+}
+
+function genShoulderSpec(
+  rng: Rng, id: ShoulderStyle, muscularity: number, posture: number, c: Controls,
+): ShoulderSpec {
+  const family = SHOULDER_FAMILIES[id]
+  const bias = 0.45 + c.variationStrength * 0.55
+  const pick = (key: ShoulderNumeric): number => {
+    const [lo, hi] = family[key] ?? SHOULDER_RANGES[key]
+    const mid = (lo + hi) / 2
+    return mid + (rng.range(lo, hi) - mid) * bias
+  }
+  // An uneven pair is its own style, but every figure carries a little of it.
+  const uneven = id === 'uneven'
+  return {
+    id,
+    width: pick('width'),
+    // Posture pulls the tips up; muscularity squares the ramp.
+    tipDrop: Math.max(0.01, pick('tipDrop') - posture * 0.06),
+    ctrlX: pick('ctrlX'),
+    ctrlY: pick('ctrlY') - posture * 0.04,
+    trapRise: pick('trapRise') + muscularity * 0.06,
+    trapCurve: clamp(pick('trapCurve') + muscularity * 0.2, 0, 1),
+    tipTurn: pick('tipTurn'),
+    tipReach: pick('tipReach'),
+    sideTaper: pick('sideTaper'),
+    sideBow: pick('sideBow'),
+    riseL: uneven ? rng.range(-0.16, 0.03) : rng.gauss(0, 0.03),
+    riseR: uneven ? rng.range(-0.03, 0.18) : rng.gauss(0, 0.03),
+  }
+}
+
 
 function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
   const v = 0.4 + c.variationStrength * 1.2
@@ -456,7 +507,9 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
     ['narrow', 1.6 + Math.max(0, -id.frame) * 2.6 + (id.ageBand === 'child' ? 2 : 0)],
     ['uneven', 1.2],
   ])
-  const shoulder = SHOULDER_STYLES[shoulderStyle]
+  const shoulderSpec = genShoulderSpec(
+    rng.fork('shoulder'), shoulderStyle, id.muscularity, id.posture, c,
+  )
 
   // Children have proportionally larger heads; that is the single strongest
   // age cue available in a bust.
@@ -488,10 +541,8 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
     shoulderStyle,
     // An uneven pair of shoulders is its own style, but every figure gets a
     // little of it.
-    shoulderRise: shoulderStyle === 'uneven'
-      ? [rng.range(-0.14, 0.02), rng.range(-0.02, 0.16)]
-      : [rng.gauss(0, 0.025), rng.gauss(0, 0.025)],
-    shoulderRound: shoulder.round * rng.range(0.8, 1.25),
+    shoulderRise: [shoulderSpec.riseL, shoulderSpec.riseR],
+    shoulderSpec,
     headRatio: clamp(fam.ratio + rng.gauss(0, 0.075 * v) - id.mass * 0.05, 0.82, 1.34),
     jaw, crown: clamp(1 + rng.gauss(0, 0.09 * v) - id.mass * 0.04, 0.76, 1.3),
     cheek,
@@ -514,8 +565,8 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
     nib: clamp(rng.gauss(0.84, 0.13), 0.58, 1.06),
     looseness: clamp(rng.gauss(1, 0.34), 0.4, 1.9),
     neck: clamp(0.5 + id.muscularity * 0.09 + id.mass * 0.07 + rng.gauss(0, 0.04 * v), 0.36, 0.72),
-    shoulderSpan: shoulderSpan * shoulder.width,
-    slope: clamp(shoulder.tipDrop + rng.gauss(0, 0.06) - id.posture * 0.05, 0.02, 0.6),
+    shoulderSpan: shoulderSpan * shoulderSpec.width,
+    slope: shoulderSpec.tipDrop,
     // A real in-plane tilt, not the two degrees it was.
     tilt: clamp(rng.gauss(-id.posture * 0.02, 0.055 + c.variationStrength * 0.06), -0.2, 0.2),
     cxJitter: rng.gauss(0, 5 + c.variationStrength * 7),

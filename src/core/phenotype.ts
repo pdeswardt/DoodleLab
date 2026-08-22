@@ -92,7 +92,7 @@ function expressBuild(dna: CharacterDNA, hand: StyleProfile): Build {
     facet: b.facet,
     shoulderStyle: b.shoulderStyle,
     shoulderRise: b.shoulderRise,
-    shoulderRound: b.shoulderRound,
+    shoulderSpec: b.shoulderSpec,
     jaw: b.jaw,
     crown: b.crown,
     cheek: b.cheek,
