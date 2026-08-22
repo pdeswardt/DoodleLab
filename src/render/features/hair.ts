@@ -14,8 +14,6 @@ import { ellipsoidShade } from '../character'
 import type { Pencil } from '../pencil'
 import { type Pt, withClip, blob, arc, lerpPt, bounds } from '../shapes'
 
-const paperOf = (s: Scene) => s.paper
-
 /** The y below which the fringe stops and forehead begins. */
 function hairlineY(g: Genome): number {
   const b = g.build
@@ -70,7 +68,7 @@ interface MassOptions {
  */
 function fillMass(
   p: Pencil, g: Genome, region: Pt[], o: MassOptions,
-  lightX: number, lightY: number, s0: Scene,
+  lightX: number, lightY: number,
 ): void {
   const pal = g.palette
   const rng = p.rng
@@ -78,14 +76,14 @@ function fillMass(
   const count = Math.max(6, Math.round(o.count * clamp(p.detail, 0.45, 1.3)))
   const form = ellipsoidShade(b.cx, b.cy, b.w * 0.55, b.h * 0.55, lightX, lightY, 1.3)
 
-  p.base(region, paperOf(s0), 0.8)
+  p.base(region, tint(pal.hair, 1.55), 0.94)
 
   withClip(p.ctx, [region], () => {
     // Block the mass in first. Strands alone leave a silhouette full of holes,
     // which is what makes procedural hair read as wire rather than hair.
     p.hatch(region, {
       color: pal.hair,
-      alpha: 0.2,
+      alpha: 0.16,
       spacing: 2.2,
       angle: Math.atan2(b.cy - o.whorl.y, b.cx - o.whorl.x) + 1.5,
       layers: 3,
@@ -188,7 +186,7 @@ function backRegion(s: Scene): Pt[] {
   const drop = b.headRy * (0.12 + fall * 1.1)
   return blob(
     b.cx, b.cy - b.headRy * 0.12 + drop * 0.3,
-    b.headRx * (1 + h.back * 0.1 + fall * 0.18),
+    b.headRx * (1 + h.back * 0.09 + fall * 0.12),
     b.headRy * (1 + h.back * 0.14) + drop * 0.42,
     p.noise,
     {
@@ -219,21 +217,22 @@ function capRegion(s: Scene): Pt[] {
     return { x: b.cx + (pt.x - b.cx) * f, y: b.cy + (pt.y - b.cy) * f }
   })
 
-  // Close along the hairline with a scalloped edge — a straight hairline is
-  // the fastest way to make hair look pasted on.
+  // Close along the hairline. A straight line here is the single fastest way to
+  // make hair look like a helmet, so it gets three things: an arch, scallops,
+  // and noise. A light fringe arcs up over the brow; a heavy one hangs down in
+  // the middle instead.
   const a = swollen[swollen.length - 1]!
   const z = swollen[0]!
-  const steps = 16
+  const steps = 20
   const line: Pt[] = []
+  const arch = b.headRy * (h.fringe > 0.62 ? 0.1 : -0.13)
   for (let i = 1; i < steps; i++) {
     const t = i / steps
     const q = lerpPt(a, z, t)
     const scallop =
       Math.sin(t * Math.PI * (2 + Math.round(h.curl * 4))) * (1.2 + h.curl * 2.4) +
-      p.noise.at1(t * 5, 3) * 1.8
-    // Sides of the fringe hang lower than its middle.
-    const sag = Math.sin(t * Math.PI) * -h.fringe * b.headRy * 0.1
-    line.push({ x: q.x, y: q.y + scallop + sag })
+      p.noise.at1(t * 5, 3) * 2
+    line.push({ x: q.x, y: q.y + scallop + Math.sin(t * Math.PI) * arch })
   }
   return [...swollen, ...line]
 }
@@ -255,7 +254,7 @@ export function drawHairBack(s: Scene): void {
       bend: 0.5,
       lane: 200,
       sheen: 0.12,
-    }, s.lx, s.ly, s)
+    }, s.lx, s.ly)
   }
 
   drawTail(s)
@@ -291,7 +290,7 @@ export function drawHairFront(s: Scene): void {
         bend: 0.55,
         lane: 260,
         sheen: 0.2,
-      }, s.lx, s.ly, s)
+      }, s.lx, s.ly)
     }
   }
 
@@ -327,7 +326,7 @@ function drawBun(s: Scene, at: Pt, r: number): void {
     bend: 1.5,
     lane: 320,
     sheen: 0.22,
-  }, s.lx, s.ly, s)
+  }, s.lx, s.ly)
 }
 
 function drawTail(s: Scene): void {
@@ -367,7 +366,7 @@ function drawTail(s: Scene): void {
       bend: 0.3,
       lane: 360 + i * 40,
       sheen: 0.18,
-    }, s.lx, s.ly, s)
+    }, s.lx, s.ly)
 
     // The tie.
     const tie = arc(t.x, t.y, 6, 4, 0, Math.PI * 2, 10)
@@ -403,7 +402,7 @@ function drawBraids(s: Scene): void {
         whorl: { x: cx, y: cy },
         from: -0.6, to: 0.6, count: 6, len: r * 3, curl: 0.4, bend: 0.8,
         lane: 440 + k * 30 + i * 4, sheen: 0.1,
-      }, s.lx, s.ly, s)
+      }, s.lx, s.ly)
     }
     // The ribbon at the end.
     p.stroke(arc(x0, y0 + len, 4.5, 3, 0, Math.PI * 2, 9), {
@@ -441,13 +440,16 @@ function drawMohawk(s: Scene): void {
     bend: 0,
     lane: 500,
     sheen: 0.25,
-  }, s.lx, s.ly, s)
+  }, s.lx, s.ly)
 }
 
 function drawSideLocks(s: Scene): void {
   const { p, g } = s
   const h = g.hair
-  if (h.sides < 0.28 || h.bald) return
+  // Only genuinely long hair falls past the temples. Below that the ears and
+  // the sides of the face stay clear, which is what stops every second
+  // character reading as a hood.
+  if (h.sides < 0.52 || h.bald) return
   const b = g.build
   const cut = hairlineY(g)
   for (const side of [-1, 1] as const) {
@@ -458,7 +460,7 @@ function drawSideLocks(s: Scene): void {
     // folded paper stuck to the temples.
     const region = blob(
       topX + side * 1, cut + drop * 0.5,
-      5 + h.sides * 2.6, drop * 0.56, p.noise,
+      4 + h.sides * 2, drop * 0.5, p.noise,
       { wobble: 0.14 + h.curl * 0.12, lumps: 2.4 + h.curl * 3, lane: 60 + side, steps: 24,
         shape: (a) => 1 + 0.2 * Math.sin(a) },
     )
@@ -472,7 +474,7 @@ function drawSideLocks(s: Scene): void {
       bend: side * 0.25,
       lane: 540 + (side + 1) * 25,
       sheen: 0.14,
-    }, s.lx, s.ly, s)
+    }, s.lx, s.ly)
   }
 }
 

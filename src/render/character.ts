@@ -274,7 +274,7 @@ function drawNeck(s: Scene): void {
   const { p, g } = s
   const pal = g.palette
   const neck = neckOutline(g)
-  p.base(neck, s.paper, 0.88)
+  p.base(neck, tint(pal.skin, 1.7), 0.97)
 
   p.hatch(neck, {
     color: pal.skin,
@@ -316,19 +316,22 @@ function drawHead(s: Scene): void {
   const pal = g.palette
   const b = g.build
 
-  // 0. Block in opaque paper, so the hair mass and the background wash stop at
-  //    the edge of the face instead of showing through it.
-  p.base(head, s.paper, 0.86)
+  // 0. A pale ground in the skin's own hue. This both stops the hair and the
+  //    wash showing through the face and gives the hatching something warmer
+  //    than bare paper to sit on.
+  p.base(head, tint(pal.skin, 1.7), 0.97)
 
   // 1. Local colour. Two layers at a shallow angle difference give the paper
   //    something to hold without reading as texture in its own right.
   p.hatch(head, {
     color: adjust(pal.skin, 0, 7),
-    alpha: 0.1,
+    alpha: 0.075,
     spacing: 2.5,
     angle: -0.55,
     layers: 2,
-    layerTurn: 24,
+    // A wide turn between layers: two nearly parallel passes read as stripes,
+    // two crossing ones read as tone.
+    layerTurn: 62,
     curve: 2.2,
     lane: 100,
   })
@@ -336,11 +339,11 @@ function drawHead(s: Scene): void {
   // 2. Form shadow.
   p.hatch(head, {
     color: shade(pal.skin, 1),
-    alpha: 0.105,
+    alpha: 0.08,
     spacing: 2.4,
     angle: -0.5,
     layers: 2,
-    layerTurn: 34,
+    layerTurn: 58,
     curve: 2.6,
     lane: 104,
     pressure: s.headShade,
@@ -455,7 +458,7 @@ export function drawCharacter(
 
   // A final tooth pass over the finished cell. Every render path lays paper
   // down first, so the canvas is opaque here and `multiply` behaves.
-  applyGrain(ctx, ART.w, ART.h, 0.4, g.index)
+  applyGrain(ctx, ART.w, ART.h, 0.5, g.index)
 }
 
 /** Convenience wrapper used by exports and the inspector. */

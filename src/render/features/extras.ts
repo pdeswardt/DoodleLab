@@ -33,7 +33,7 @@ function drawHat(s: Scene): void {
   const body = (region: Pt[], alpha = 0.12): void => {
     // Headwear is opaque cloth. Without a base the hair reads straight through
     // it and the hat looks like a ghost.
-    p.base(region, s.paper, 0.9)
+    p.base(region, tint(col, 1.7), 0.96)
     p.hatch(region, {
       color: col, alpha, spacing: 2.4, angle: 0.7 + tilt, layers: 2, layerTurn: 26,
       lane: 3000, pressure: (x, y) => 0.45 + shading(x, y) * 0.8,
@@ -54,7 +54,7 @@ function drawHat(s: Scene): void {
         { x: b.cx + b.headRx * 1.02, y: topY + b.headRy * 0.9 },
         { x: b.cx - b.headRx * 1.02, y: topY + b.headRy * 0.9 },
       ]
-      p.base(cuff, s.paper, 0.9)
+      p.base(cuff, tint(col, 1.9), 0.96)
       p.hatch(cuff, { color: tint(col, 0.8), alpha: 0.14, spacing: 2, angle: 1.5, layers: 2, lane: 3008 })
       p.contour(cuff, { color: ink, alpha: 0.14, width: 1.3, passes: 1, lane: 3010 })
       // A bobble, sometimes.
@@ -95,7 +95,7 @@ function drawHat(s: Scene): void {
           { x: b.cx + dir * b.headRx * 0.15, y: topY + b.headRy * 0.88 }, 10,
         ).slice(1),
       ]
-      p.base(brim, s.paper, 0.92)
+      p.base(brim, tint(col, 1.7), 0.96)
       p.hatch(brim, { color: shade(col, 0.7), alpha: 0.15, spacing: 2, angle: 0.2, layers: 2, lane: 3018 })
       p.contour(brim, { color: ink, alpha: 0.15, width: 1.3, passes: 1, lane: 3020 })
       break
@@ -104,7 +104,7 @@ function drawHat(s: Scene): void {
       const brim = blob(b.cx, topY + b.headRy * 0.72, b.headRx * 1.85, b.headRy * 0.5, p.noise, {
         n: 2.1, wobble: 0.07, lumps: 3, lane: 133, steps: 40,
       })
-      p.base(brim, s.paper, 0.9)
+      p.base(brim, tint(col, 1.7), 0.96)
       p.hatch(brim, {
         color: col, alpha: 0.1, spacing: 2.6, angle: 0.3, layers: 2, layerTurn: 40, lane: 3022,
         pressure: (_x, y) => clamp(0.3 + Math.abs(y - (topY + b.headRy * 0.72)) / (b.headRy * 0.5), 0, 1),

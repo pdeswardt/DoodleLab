@@ -106,7 +106,7 @@ export class Pencil {
 
   private styleCache = new Map<number, string>()
 
-  constructor(ctx: CanvasRenderingContext2D, rng: Rng, noise: Noise, detail = 1, gain = 1.32) {
+  constructor(ctx: CanvasRenderingContext2D, rng: Rng, noise: Noise, detail = 1, gain = 1.62) {
     this.ctx = ctx
     this.rng = rng
     this.noise = noise
@@ -360,19 +360,21 @@ export class Pencil {
   }
 
   /**
-   * Lay opaque paper inside a shape before drawing on it.
+   * Lay an opaque ground inside a shape before hatching it.
    *
-   * Pigment layers are translucent, so without this the hair behind a head and
-   * the wash behind a figure both show straight through the face. Real paper is
-   * opaque; this restores that. A little is left transparent so the background
-   * still breathes at the edges instead of the figure looking cut out.
+   * Two jobs at once. Pigment layers are translucent, so without a ground the
+   * hair behind a head and the wash behind a figure show straight through the
+   * face. And a coloured-pencil drawing is not built on bare paper anyway — you
+   * put down a pale wash of the local colour first and build the darks on top
+   * of it. Passing a light version of the form's own hue does both, and avoids
+   * the pale cut-out look that a flat paper fill gives.
    */
-  base(region: readonly Pt[], paper: Hsl, alpha = 0.88): void {
+  base(region: readonly Pt[], ground: Hsl, alpha = 0.97): void {
     const ctx = this.ctx
     ctx.save()
     ctx.globalCompositeOperation = 'source-over'
     tracePath(ctx, region, true)
-    ctx.fillStyle = this.style(paper, alpha)
+    ctx.fillStyle = this.style(ground, alpha)
     ctx.fill()
     ctx.restore()
   }
@@ -435,7 +437,7 @@ let darkGrainCache: HTMLCanvasElement | null = null
  * The paper tooth. One tile is generated at startup and multiplied over every
  * pigment layer, which is what stops flat areas from looking like flat areas.
  */
-export function grainTile(size = 256): HTMLCanvasElement {
+export function grainTile(size = 512): HTMLCanvasElement {
   if (grainTileCache) return grainTileCache
   const c = document.createElement('canvas')
   c.width = c.height = size
@@ -445,10 +447,13 @@ export function grainTile(size = 256): HTMLCanvasElement {
   const data = img.data
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      // Two scales: fine tooth plus a slower undulation of the sheet.
-      const fine = noise.at(x * 0.9, y * 0.9)
-      const coarse = noise.fbm(x * 0.05, y * 0.05, 2)
-      const v = 236 + fine * 17 + coarse * 8
+      // Two scales: fine tooth plus a slower undulation of the sheet. The fine
+      // term runs at close to one grain per device pixel, which is what makes
+      // the texture read as paper rather than as a soft haze.
+      const fine = noise.at(x * 2.1, y * 2.1)
+      const finer = noise.at(x * 4.3 + 91, y * 4.3 + 17)
+      const coarse = noise.fbm(x * 0.09, y * 0.09, 2)
+      const v = 234 + fine * 22 + finer * 10 + coarse * 11
       const i = (y * size + x) * 4
       data[i] = data[i + 1] = data[i + 2] = clamp(v, 0, 255)
       data[i + 3] = 255
@@ -467,7 +472,7 @@ export function grainTile(size = 256): HTMLCanvasElement {
  * hazing the whole frame. This tile is composited with `source-atop` instead,
  * so it can only darken pigment that is already there.
  */
-export function darkGrainTile(size = 256): HTMLCanvasElement {
+export function darkGrainTile(size = 512): HTMLCanvasElement {
   if (darkGrainCache) return darkGrainCache
   const c = document.createElement('canvas')
   c.width = c.height = size
@@ -477,9 +482,10 @@ export function darkGrainTile(size = 256): HTMLCanvasElement {
   const data = img.data
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const fine = noise.at(x * 0.9, y * 0.9)
-      const coarse = noise.fbm(x * 0.05, y * 0.05, 2)
-      const a = clamp(58 + fine * 46 + coarse * 22, 0, 255)
+      const fine = noise.at(x * 2.1, y * 2.1)
+      const finer = noise.at(x * 4.3 + 91, y * 4.3 + 17)
+      const coarse = noise.fbm(x * 0.09, y * 0.09, 2)
+      const a = clamp(56 + fine * 52 + finer * 24 + coarse * 24, 0, 255)
       const i = (y * size + x) * 4
       data[i] = 74
       data[i + 1] = 62
@@ -501,32 +507,45 @@ export function grainPigment(
 ): void {
   const tile = darkGrainTile()
   ctx.save()
+  const scale = ctx.getTransform().a || 1
   ctx.globalCompositeOperation = 'source-atop'
   ctx.globalAlpha = strength
   const pattern = ctx.createPattern(tile, 'repeat')
   if (pattern) {
-    const o = (offset * 97) % 256
-    ctx.translate(-o, -o * 0.61)
+    ctx.scale(1 / scale, 1 / scale)
+    const o = (offset * 97) % 512
+    ctx.translate(-o, -((offset * 61) % 512))
     ctx.fillStyle = pattern
-    ctx.fillRect(0, 0, w + 256, h + 256)
+    ctx.fillRect(0, 0, w * scale + 512, h * scale + 512)
   }
   ctx.restore()
 }
 
-/** Multiply the grain tile over whatever has been drawn so far. */
+/**
+ * Multiply the tooth over whatever has been drawn so far.
+ *
+ * The pattern is laid down at *device* resolution rather than in the drawing's
+ * own units. The context is normally scaled — a thumbnail draws 240 art units
+ * into 208 pixels, the inspector draws them into 480 — and painting the tile in
+ * art units would stretch one grain across two or three pixels at high zoom,
+ * turning crisp paper into a soft haze. Undoing the scale first keeps one grain
+ * to one pixel at every size.
+ */
 export function applyGrain(
   ctx: CanvasRenderingContext2D, w: number, h: number, strength = 0.55, offset = 0,
 ): void {
   const tile = grainTile()
   ctx.save()
+  const scale = ctx.getTransform().a || 1
   ctx.globalCompositeOperation = 'multiply'
   ctx.globalAlpha = strength
   const pattern = ctx.createPattern(tile, 'repeat')
   if (pattern) {
-    const o = (offset * 97) % 256
-    ctx.translate(-o, -o * 0.61)
+    ctx.scale(1 / scale, 1 / scale)
+    const o = (offset * 97) % 512
+    ctx.translate(-o, -((offset * 61) % 512))
     ctx.fillStyle = pattern
-    ctx.fillRect(0, 0, w + 256, h + 256)
+    ctx.fillRect(0, 0, w * scale + 512, h * scale + 512)
   }
   ctx.restore()
 }
