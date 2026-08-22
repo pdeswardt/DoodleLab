@@ -2,11 +2,11 @@
   "name": "pencilfolk",
   "version": "1.0.0",
   "private": true,
-  "description": "Procedural colored-pencil character sheets — 256 hand-drawn-feeling folk, each with their own quirks and a one-word soul.",
+  "description": "Procedural colored-pencil character sheets \u2014 256 hand-drawn-feeling folk, each with their own quirks and a one-word soul.",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },

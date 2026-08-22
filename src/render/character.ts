@@ -14,7 +14,7 @@ import { ART, type Genome } from '../core/genome'
 import { Pencil, applyGrain, makePaper } from './pencil'
 import { LayerStack } from './layers'
 import { STYLES, type StyleProfile } from '../core/style'
-import { blob, quad, arc, inset, tracePath, centroid, type Pt } from './shapes'
+import { quad, arc, tracePath, centroid, type Pt } from './shapes'
 import { drawHairBack, drawHairFront } from './features/hair'
 import { drawFace, drawEars } from './features/face'
 import { drawGarment } from './features/garment'
@@ -49,6 +49,15 @@ export interface Scene {
   hairFrontRegion: Pt[] | null
   /** Headwear, likewise. */
   hatRegion: Pt[] | null
+  /**
+   * Register a region as an occluder for its layer.
+   *
+   * Anything drawn into a layer that extends beyond that layer's main
+   * silhouette has to say so, or it keeps none of its opacity and gains no
+   * occlusion — a beard hanging below the jaw had the shirt showing straight
+   * through it, and hat brims had the face showing through them.
+   */
+  addOccluder: (layer: string, region: readonly Pt[]) => void
   /** Unit vector pointing toward the light. */
   lx: number
   ly: number
@@ -257,69 +266,19 @@ function drawWash(s: Scene): void {
   const w = g.wash
   const pal = g.palette
 
-  const region = blob(w.cx, w.cy, w.rx, w.ry, p.noise, {
-    n: w.n,
-    wobble: w.wobble,
-    lumps: w.lumps,
-    lane: 5,
-    steps: 52,
-  })
-
-  // Two broad passes at different angles read as a hand scrubbing the pencil
-  // sideways across the paper.
-  p.wash(region, {
-    color: pal.wash,
-    alpha: 0.085,
-    angle: 0.34 + w.tilt,
-    layers: 2,
-    layerTurn: 64,
-    softness: 1.15,
-    lane: 21,
-  })
-
-  if (w.twoTone) {
-    // A second hue pooled toward one corner keeps the haze from being flat.
-    const corner = inset(region, 0.72, {
-      x: w.cx + w.rx * 0.34 * Math.cos(w.tilt * 3),
-      y: w.cy + w.ry * 0.3,
-    })
-    p.wash(corner, {
-      color: pal.washAlt,
-      alpha: 0.1,
-      angle: -0.5 + w.tilt,
-      layers: 1,
-      softness: 1.3,
-      lane: 33,
-    })
-  }
-
-  // Soften the boundary with a second, larger, much fainter pass rather than
-  // with explicit edge strokes.
+  // A field, not strokes.
   //
-  // Both previous attempts at edge marks failed the same way: taking runs of
-  // consecutive boundary points and stroking them wide produces long capsules,
-  // and across the top of a blob those runs are horizontal — so the background
-  // became a field of bars. A wash softens because it is thin at the edges,
-  // not because something was drawn there.
-  const halo = blob(w.cx, w.cy, w.rx * 1.18, w.ry * 1.16, p.noise, {
-    n: w.n * 0.9,
-    wobble: w.wobble * 1.5,
-    lumps: w.lumps * 1.2,
-    lane: 9,
-    steps: 46,
-  })
-  p.wash(halo, {
-    color: pal.wash,
-    alpha: 0.035,
-    angle: 0.34 + w.tilt + 0.9,
-    layers: 1,
-    softness: 1.5,
-    lane: 44,
-  })
-
-  const edgeRng = p.rng
+  // In the reference this is what gives each portrait its depth: a soft,
+  // off-square haze behind the figure with no marks in it at all. Every
+  // stroke-based attempt at it produced bars — marks whose width is near their
+  // spacing tile edge to edge, and softening their ends only turns each bar
+  // into a lens. Overlapping radial falloffs give the structureless haze the
+  // reference actually has, and the tooth pass over the finished cell is what
+  // keeps it reading as pigment on paper.
+  p.washField(w.cx, w.cy, w.rx, w.ry, pal.wash, pal.washAlt, 0.66, w.twoTone ? 6 : 4)
 
   // Optional motes: specks of the accent colour floating in the haze.
+  const edgeRng = p.rng
   if (w.motes > 0) {
     for (let i = 0; i < w.motes; i++) {
       const a = edgeRng.next() * Math.PI * 2
@@ -532,13 +491,18 @@ export function drawCharacter(
     lctx.translate(-g.build.cx, -g.build.cy)
   }
 
+  const extraOccluders: { layer: string; region: Pt[] }[] = []
+
   const s: Scene = {
     p: pens.wash, g, head, torso, lx, ly,
     headCentre: centroid(head),
     hairBehind: null,
     hairFrontRegion: null,
     hatRegion: null,
-    paper: o.paperTone ?? hsl(42, 32, 96),
+    addOccluder: (layer, region) => {
+      if (region.length > 2) extraOccluders.push({ layer, region: [...region] })
+    },
+    paper: o.paperTone ?? hsl(42, 20, 99),
     headShade: ellipsoidShade(g.build.cx, g.build.cy - g.build.headRy * 0.08, g.build.headRx, g.build.headRy, lx, ly),
   }
 
@@ -584,6 +548,7 @@ export function drawCharacter(
   stack.occlude('head', head)
   if (s.hairFrontRegion) stack.occlude('hairFront', s.hairFrontRegion)
   if (s.hatRegion) stack.occlude('extras', s.hatRegion)
+  for (const extra of extraOccluders) stack.occlude(extra.layer, extra.region)
 
   // Cast shadow, now that the drawing knows what is in front of what. Offsets
   // follow the sheet's key light; these are the marks that put the head on the
@@ -606,7 +571,7 @@ export function drawCharacter(
 
   // A final tooth pass over the finished cell. Every render path lays paper
   // down first, so the canvas is opaque here and `multiply` behaves.
-  applyGrain(ctx, ART.w, ART.h, 0.12, g.index)
+  applyGrain(ctx, ART.w, ART.h, 0.07, g.index)
 }
 
 /** Convenience wrapper used by exports and the inspector. */

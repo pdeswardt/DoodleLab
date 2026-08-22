@@ -490,29 +490,43 @@ export class Pencil {
    * made of: very wide, very faint marks that read as a haze rather than as
    * individual strokes.
    */
-  wash(region: readonly Pt[], o: HatchOptions & { softness?: number }): void {
-    const softness = o.softness ?? 1
-    this.hatch(region, {
-      // Wash marks are ten times the width of a hatch line, so the density
-      // factor that tightens hatching would make this ruinously expensive for
-      // no visible gain — the marks already overlap heavily.
-      spacing: 12 * softness,
-      // Width has to *exceed* the spacing, or the marks tile edge to edge and
-      // the haze becomes a field of bars with visible ends. Overlapping them
-      // heavily at a low alpha is what makes a wash read as a wash.
-      width: 22 * softness,
-      width: 9 * softness,
-      alpha: 0.028,
-      layers: 2,
-      layerTurn: 58,
-      curve: 4,
-      gaps: 0.1,
-      // A heavy taper turns each broad mark into a lens with two visible ends;
-      // across a wash that reads as a field of capsules rather than as haze.
-      taper: 0.25,
-      hueJitter: 5,
-      ...o,
-    })
+  /**
+   * A soft field of colour, laid with no strokes at all.
+   *
+   * Four attempts at this failed the same way, because it kept being treated
+   * as a stroke problem. Any wash assembled from directional marks whose width
+   * is near their spacing tiles into bars with visible ends — softening the
+   * taper only turns each bar into a lens, and feathering the boundary with
+   * more strokes adds more capsules. The reference's background has no marks in
+   * it: it is a structureless chromatic haze.
+   *
+   * So this lays overlapping soft radial falloffs instead. The tooth pass over
+   * the finished cell is what makes it read as pigment on paper rather than as
+   * an airbrush.
+   */
+  washField(
+    cx: number, cy: number, rx: number, ry: number,
+    a: Hsl, b: Hsl, alpha: number, blobs = 5,
+  ): void {
+    const ctx = this.ctx
+    const rng = this.rng
+    ctx.save()
+    ctx.globalCompositeOperation = 'multiply'
+    for (let i = 0; i < blobs; i++) {
+      const ox = cx + rng.gauss(0, rx * 0.34)
+      const oy = cy + rng.gauss(0, ry * 0.34)
+      const r = rx * rng.range(0.55, 1.15)
+      const col = i % 2 === 0 ? a : b
+      const grad = ctx.createRadialGradient(ox, oy, r * 0.05, ox, oy, r)
+      grad.addColorStop(0, css(col, alpha * rng.range(0.75, 1.25)))
+      grad.addColorStop(0.55, css(col, alpha * 0.5))
+      grad.addColorStop(1, css(col, 0))
+      ctx.fillStyle = grad
+      ctx.beginPath()
+      ctx.ellipse(ox, oy, r, r * (ry / rx), rng.gauss(0, 0.3), 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.restore()
   }
 
   /**
@@ -827,7 +841,10 @@ export function makePaper(w: number, h: number, tone: Hsl, seed: string): HTMLCa
   // knocked the brightest achievable pixel down to ~236, and since every
   // pigment layer multiplies, nothing in the picture could ever be whiter than
   // that. The reference is nearly half bare paper.
-  applyGrain(ctx, c.width, c.height, 0.16)
+  // The tooth subtracts from white; it must not sit on top of it as a floor.
+  // At 0.16 the brightest achievable pixel was 243, so nothing in the picture
+  // could ever be paper-white — and the reference is 46% paper-white.
+  applyGrain(ctx, c.width, c.height, 0.09)
 
   // A handful of fibres pressed into the pulp.
   ctx.save()

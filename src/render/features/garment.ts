@@ -391,6 +391,7 @@ function drawScarf(s: Scene): void {
   const wrap = blob(b.cx, b.neckY + 10, b.neckW * 1.9, 13, p.noise, {
     wobble: 0.12, lumps: 3, lane: 91, steps: 26,
   })
+  s.addOccluder('body', wrap)
   p.hatch(wrap, { color: col, alpha: 0.13, spacing: 2.2, angle: 0.3, layers: 2, layerTurn: 30, lane: 2200 })
   p.contour(wrap, { color: shade(col, 1.5), alpha: 0.14, width: 1.3, passes: 1, lane: 2204 })
 

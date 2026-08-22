@@ -36,6 +36,7 @@ function drawHat(s: Scene): void {
 
   const body = (region: Pt[], alpha = 0.12, smooth = true): void => {
     s.hatRegion = region
+    s.addOccluder('extras', region)
     // Headwear is opaque cloth. Without a base the hair reads straight through
     // it and the hat looks like a ghost.
     p.base(region, ground(col), 0.6, smooth)
@@ -100,6 +101,7 @@ function drawHat(s: Scene): void {
           { x: hc.x + dir * b.headRx * 0.15, y: topY + b.headRy * 0.88 }, 10,
         ).slice(1),
       ]
+      s.addOccluder('extras', brim)
       p.base(brim, ground(col), 0.6)
       p.hatch(brim, { color: shade(col, 0.7), alpha: 0.15, spacing: 2, angle: 0.2, layers: 2, lane: 3018 })
       p.contour(brim, { color: ink, alpha: 0.15, width: 1.3, passes: 1, lane: 3020 })
@@ -109,6 +111,7 @@ function drawHat(s: Scene): void {
       const brim = blob(hc.x, topY + b.headRy * 0.72, b.headRx * 1.85, b.headRy * 0.5, p.noise, {
         n: 2.1, wobble: 0.07, lumps: 3, lane: 133, steps: 40,
       })
+      s.addOccluder('extras', brim)
       p.base(brim, ground(col), 0.6)
       p.hatch(brim, {
         color: col, alpha: 0.1, spacing: 2.6, angle: 0.3, layers: 2, layerTurn: 40, lane: 3022,

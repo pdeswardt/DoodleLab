@@ -103,7 +103,7 @@ export const MOODS: Mood[] = [
     sat: [22, 52],
     light: [42, 72],
     washSat: 1,
-    paper: hsl(42, 26, 98),
+    paper: hsl(42, 20, 99.2),
   },
   {
     id: 'harbour',
@@ -113,7 +113,7 @@ export const MOODS: Mood[] = [
     sat: [18, 46],
     light: [38, 68],
     washSat: 0.9,
-    paper: hsl(38, 20, 98),
+    paper: hsl(38, 16, 99.2),
   },
   {
     id: 'orchard',
@@ -123,7 +123,7 @@ export const MOODS: Mood[] = [
     sat: [28, 58],
     light: [38, 66],
     washSat: 1.05,
-    paper: hsl(36, 30, 97),
+    paper: hsl(36, 24, 99),
   },
   {
     id: 'confetti',
@@ -133,7 +133,7 @@ export const MOODS: Mood[] = [
     sat: [38, 70],
     light: [46, 74],
     washSat: 1.25,
-    paper: hsl(48, 24, 98),
+    paper: hsl(48, 18, 99.3),
   },
   {
     id: 'dusk',
@@ -143,7 +143,7 @@ export const MOODS: Mood[] = [
     sat: [20, 48],
     light: [32, 60],
     washSat: 0.95,
-    paper: hsl(30, 16, 97),
+    paper: hsl(30, 14, 98.8),
   },
   {
     id: 'bakery',
@@ -153,7 +153,7 @@ export const MOODS: Mood[] = [
     sat: [30, 60],
     light: [52, 78],
     washSat: 1.1,
-    paper: hsl(44, 30, 98),
+    paper: hsl(44, 22, 99.2),
   },
 ]
 

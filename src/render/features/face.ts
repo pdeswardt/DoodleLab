@@ -476,7 +476,7 @@ function drawBrows(s: Scene): void {
         }
         p.stroke(seg, {
           color: col, alpha: 0.2, width: 1.3, passes: 1, wobble: 0.35,
-          gaps: spec.broken ? 0.5 : 0.12, taper: 0.8, lane: lane + i,
+          gaps: spec.broken ? 0.28 : 0.05, taper: 0.85, lane: lane + i,
         })
       }
     } else {
@@ -901,6 +901,7 @@ function drawFacialHair(s: Scene): void {
           b.headRx * 0.16, b.headRy * 0.3, p.noise,
           { wobble: 0.16, lumps: 3, lane: 79 + side, steps: 18 },
         )
+        s.addOccluder('head', region)
         p.hatch(region, { color: col, alpha: 0.13, spacing: 2, angle: 1.3, layers: 2, lane: 1520 + side * 6 })
         p.contour(region, { color: shade(col, 1.2), alpha: 0.09, width: 1.1, passes: 1, wobble: 1.6, lane: 1524 })
       }
@@ -923,6 +924,7 @@ function drawFacialHair(s: Scene): void {
         wobble: 0.1, lumps: 3.5, lane: 80, steps: 30,
         shape: (a) => (Math.sin(a) > 0 ? 1.08 : 0.7),
       })
+      s.addOccluder('head', region)
       p.hatch(region, { color: col, alpha: 0.1, spacing: 2, angle: 1.45, layers: 2, layerTurn: 18, lane: 1540 })
       p.hatch(region, {
         color: shade(col, 1.6), alpha: 0.07, spacing: 2.6, angle: 1.2, layers: 1, lane: 1544,
