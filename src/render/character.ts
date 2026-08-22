@@ -213,8 +213,8 @@ function shoulderEdge(g: Genome, side: -1 | 1): Pt[] {
     // The turn at the tip: sharp on a square shoulder, generous on a round one.
     ...quad(
       { x: b.cx + side * sw * 0.94, y: tipY },
-      { x: b.cx + side * sw * (1.02 + b.shoulderRound * 0.1), y: tipY + 14 + b.shoulderRound * 22 },
-      { x: b.cx + side * sw * 1.02, y: hemFor(g) },
+      { x: b.cx + side * sw * (0.95 + b.shoulderRound * 0.08), y: tipY + 14 + b.shoulderRound * 22 },
+      { x: b.cx + side * sw * 0.93, y: hemFor(g) },
       10,
     ).slice(1),
   ]
@@ -266,16 +266,19 @@ function drawWash(s: Scene): void {
   const w = g.wash
   const pal = g.palette
 
-  // The soft pencil hatching behind each figure — the thing that gives the
-  // reference its depth. Scrubbed, not tiled: see `washHatch`.
-  p.washHatch(w.cx, w.cy, w.rx * 1.08, w.ry * 1.08, pal.wash, pal.washAlt, {
-    angle: 0.34 + w.tilt,
-    // Tight angular spread: the marks should read as directional hatching, the
-    // way a hand lays a background in, not as scattered scribble.
-    spread: w.twoTone ? 0.3 : 0.16,
-    count: w.twoTone ? 300 : 250,
-    alpha: 0.1,
-    width: 6,
+  // The background panel, as the reference does it: a big rounded square the
+  // whole figure sits on, with white paper margin all round it, scrubbed in
+  // with hatching that follows the panel's edges. See `washPanel`.
+  //
+  // A warm note is mixed in alongside the two cool ones, because the reference
+  // is not one tint — it runs cool across the top and warms toward one side.
+  // Low enough in lightness to actually register once it is hatched at a few
+  // per cent alpha — a 93%-light tint over paper is invisible.
+  const warm = hsl(38, 42, 86)
+  p.washPanel(w.cx, w.cy, w.rx, w.ry, w.n, [pal.wash, warm, pal.washAlt], {
+    alpha: 0.062,
+    spacing: 3.6,
+    wobble: w.wobble * 0.35,
   })
 
   // Optional motes: specks of the accent colour floating in the haze.

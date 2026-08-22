@@ -63,6 +63,16 @@ function expressPalette(dna: CharacterDNA, hand: StyleProfile): Palette {
   }
 }
 
+/**
+ * Pass values below `knee` through unchanged, then compress everything above
+ * it so the result approaches `cap` without ever reaching it.
+ */
+function softCap(v: number, knee: number, cap: number): number {
+  if (v <= knee) return v
+  const room = cap - knee
+  return knee + room * (1 - Math.exp(-(v - knee) / room))
+}
+
 function expressBuild(dna: CharacterDNA, hand: StyleProfile): Build {
   const b = dna.body
   const shape = HEAD_SHAPES[b.shape]
@@ -101,7 +111,13 @@ function expressBuild(dna: CharacterDNA, hand: StyleProfile): Build {
     // The neckline has to clear the chin, or collars ride up over the mouth.
     neckY: cy + headRy * 1.02,
     shoulderY: cy + headRy * 1.32,
-    shoulderW: headRx * b.shoulderSpan,
+    // Soft-knee the shoulder width. The reference sits the whole figure on
+    // the background panel with paper margin outside it, and a wide build
+    // times a large head ran the shoulders clean off the frame, covering the
+    // panel entirely. Narrow builds pass through untouched; only the widest
+    // are compressed, so the variation survives but the figure stays on the
+    // panel.
+    shoulderW: softCap(headRx * b.shoulderSpan, 70, 95),
     slope: b.slope,
   }
 }
@@ -342,7 +358,9 @@ export function express(dna: CharacterDNA, o: ExpressOptions): Genome {
 
   const extras = {
     glasses: dna.wardrobe.glasses,
+    glassesSpec: dna.wardrobe.glassesSpec,
     hat: dna.wardrobe.hat,
+    hatSpec: dna.wardrobe.hatSpec,
     hatTilt: dna.wardrobe.hatTilt,
     hatColor: rng.bool(0.5) ? palette.garmentAlt : palette.accent,
     earring: dna.wardrobe.earring,
@@ -358,11 +376,15 @@ export function express(dna: CharacterDNA, o: ExpressOptions): Genome {
 
   const wr = rng.fork('wash')
   const wash: Wash = {
-    cx: build.cx + wr.gauss(0, 5),
-    cy: build.cy + wr.range(6, 24),
-    rx: build.headRx * wr.range(1.55, 2.05),
-    ry: build.headRy * wr.range(1.5, 1.95),
-    n: wr.range(2.4, 5.2),
+    // A panel the whole figure sits on, roughly three quarters of the frame,
+    // not a halo around the head — see the reference. The white margin outside
+    // it is part of the composition.
+    cx: ART.w / 2 + wr.gauss(0, 5),
+    cy: ART.h * 0.44 + wr.gauss(0, 7),
+    rx: ART.w * wr.range(0.40, 0.45),
+    ry: ART.h * wr.range(0.40, 0.45),
+    // Well above 2, so it is a rounded square rather than an ellipse.
+    n: wr.range(3.2, 5.4),
     wobble: wr.range(0.05, 0.14),
     lumps: wr.range(1.6, 3.4),
     motes: wr.bool(0.3 + dna.controls.memorability * 0.3) ? wr.int(3, 9) : 0,

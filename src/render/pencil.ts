@@ -23,7 +23,7 @@ import { type Hsl, css, adjust, clamp } from '../core/color'
 import { STYLES, type StyleProfile } from '../core/style'
 import {
   type Pt, resample, normalAt, bounds, centroid, withClip, tracePath,
-  insideSpans, intersectSpans, contains,
+  insideSpans, intersectSpans, contains, blob,
 } from './shapes'
 
 export interface StrokeOptions {
@@ -486,88 +486,147 @@ export class Pencil {
   }
 
   /**
-   * Broad, side-of-the-pencil coverage. This is what the background wash is
-   * made of: very wide, very faint marks that read as a haze rather than as
-   * individual strokes.
-   */
-  /**
-   * A scrubbed pencil wash: visibly hatched, but reading as tone.
+   * The background panel: a scrubbed, hatched field of pale colour.
    *
-   * Earlier attempts at this tiled into bars, and the cause was never that it
-   * was made of strokes — it was that every stroke was identical. Uniform
-   * pitch, uniform length, round caps, and a width close to the spacing gives
-   * you a row of matching capsules on a regular grid, which is what a bar
-   * field is.
+   * Taken from the reference rather than from guesswork. Four things there
+   * that earlier versions all missed:
    *
-   * A hand scrubbing a background does none of those things: the marks vary in
-   * length, they start and stop in different places so their ends never line
-   * up, they fan across a range of angles, and they thin out toward the edges
-   * rather than stopping at a boundary. Sampling stroke centres with a radial
-   * bias and letting the outermost ones run past the edge gives the soft
-   * boundary for free, with no feathering pass to go wrong.
+   *  - It is a large **rounded square** covering most of the frame, which the
+   *    whole figure sits on — not a halo around the head. There is white paper
+   *    margin all around it, and that margin is part of the composition.
+   *  - The interior is nearly **flat and very pale**. It is the *edge* that
+   *    carries the panel: a denser band of visible strokes in the last fifth
+   *    before the boundary, which is what reads as a deliberate backdrop
+   *    against the white margin.
+   *  - It is **multi-hued** — cool overall, with a warm cream patch to one
+   *    side and a pale green to the other, each fading out at its own edges
+   *    rather than meeting at a seam.
+   *  - The marks are **parallel**, not scattered. Scattering short strokes at
+   *    random positions clumps and leaves holes, which is why every previous
+   *    attempt read as blotches; laying proper crossed hatch over the whole
+   *    panel is what makes it a wash.
    */
-  washHatch(
-    cx: number, cy: number, rx: number, ry: number,
-    a: Hsl, b: Hsl, o: {
-      count?: number
-      angle?: number
-      spread?: number
-      alpha?: number
-      width?: number
-      length?: number
-    } = {},
+  washPanel(
+    cx: number, cy: number, rx: number, ry: number, n: number,
+    tints: readonly Hsl[],
+    o: { alpha?: number; spacing?: number; wobble?: number } = {},
   ): void {
     const rng = this.rng
-    const count = Math.round((o.count ?? 150) * clamp(this.detail, 0.45, 1.35))
-    const baseAngle = (o.angle ?? 0.35) + this.angleBias
-    const spread = o.spread ?? 0.5
     const alpha = (o.alpha ?? 0.05) * this.hand.saturation
-    const width = o.width ?? 7
-    const lengthScale = o.length ?? 1
+    const spacing = o.spacing ?? 3.6
+    const inv = 2 / Math.max(2, n)
 
-    for (let i = 0; i < count; i++) {
-      // Area-uniform, not centre-biased.
-      //
-      // Biasing density toward the middle seemed right — a dense core thinning
-      // out — but the figure sits on the middle and hides it, so all that was
-      // ever visible was the sparse, faint rim, which read as a starburst of
-      // rays around the head. The patch is even, and only the outer fifth
-      // fades; occlusion takes care of the centre.
-      const t = Math.sqrt(rng.next())
-      const around = rng.next() * Math.PI * 2
-      const px = cx + Math.cos(around) * rx * t
-      const py = cy + Math.sin(around) * ry * t
+    // The panel outline. Hatched to, not drawn — the boundary is where the
+    // strokes stop, which is how a scrubbed edge is made.
+    const panel = blob(cx, cy, rx, ry, this.noise, {
+      n, steps: 96, wobble: o.wobble ?? 0.035, lumps: 2.4, lane: 41,
+    })
 
-      const dir = baseAngle + rng.gauss(0, spread)
-      // Length varies by a factor of three, so no two marks end together —
-      // but short enough to read as hatching rather than as rays.
-      const len = rx * rng.range(0.22, 0.62) * lengthScale
-      const dx = Math.cos(dir)
-      const dy = Math.sin(dir)
-      const bow = rng.gauss(0, len * 0.09)
+    // Superellipse radius: 1 at the boundary, 0 at the centre.
+    const radius = (x: number, y: number): number => {
+      const ux = (x - cx) / rx
+      const uy = (y - cy) / ry
+      return (Math.abs(ux) ** (2 / inv) + Math.abs(uy) ** (2 / inv)) ** (inv / 2)
+    }
 
-      const pts: Pt[] = []
-      for (let k = 0; k <= 3; k++) {
-        const u = k / 3 - 0.5
-        const bend = bow * (1 - (u * 2) ** 2)
-        pts.push({ x: px + dx * len * u - dy * bend, y: py + dy * len * u + dx * bend })
-      }
+    // Even across the middle, heavier in the last third. The cloud term keeps
+    // it from being a machine gradient.
+    const field = (x: number, y: number): number => {
+      const r = radius(x, y)
+      const edge = 0.55 + 0.85 * clamp((r - 0.6) / 0.4, 0, 1)
+      const cloud = 0.7 + this.noise.at(x * 0.011 + 5.5, y * 0.011) * 0.55
+      return clamp(edge * cloud, 0, 1.5)
+    }
 
-      this.stroke(pts, {
-        color: rng.bool(0.5) ? a : b,
-        // Full weight across the patch, fading only in the outer fifth.
-        alpha: alpha * clamp((1 - t) / 0.22, 0, 1) * rng.range(0.65, 1.35),
-        width: width * rng.range(0.6, 1.5),
-        passes: 1,
-        wobble: 1.6,
-        wobbleFreq: 1.6,
-        gaps: 0.3,
-        taper: 0.85,
-        step: 5,
-        hueJitter: 6,
-        lane: 700 + i,
+    const cool = tints[0]!
+    const warm = tints[1] ?? cool
+    const alt = tints[2] ?? cool
+
+    // The panel is scrubbed in as overlapping *bands*, not as full-height
+    // ruled lines. A hatch line that runs the whole height of the panel reads
+    // as a ruled stripe however much it wobbles; the reference's marks are
+    // short, overlap, and change direction from one part of the panel to the
+    // next, because a hand scrubs a patch at a time and moves on.
+    const band = (
+      x0: number, y0: number, x1: number, y1: number,
+      angle: number, a: number, sp: number, lane: number,
+    ): void => {
+      this.hatch(panel, {
+        color: cool,
+        alpha: a,
+        spacing: sp,
+        angle,
+        layers: 1,
+        clipTo: [[
+          { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 },
+        ]],
+        pressure: field,
+        curve: 2.6,
+        gaps: 0.4,
+        hueJitter: 7,
+        lane,
       })
     }
+
+    // Three overlapping horizontal bands scrubbed vertically, then two
+    // vertical bands scrubbed across. The crossing is what turns lines into a
+    // wash; the overlap is what hides the joins.
+    const top = cy - ry * 1.05
+    const bot = cy + ry * 1.05
+    const left = cx - rx * 1.05
+    const right = cx + rx * 1.05
+    const rows = 3
+    for (let i = 0; i < rows; i++) {
+      const t0 = top + ((bot - top) * i) / rows - ry * 0.12
+      const t1 = top + ((bot - top) * (i + 1)) / rows + ry * 0.12
+      band(left, t0, right, t1, Math.PI / 2 + rng.gauss(0, 0.11), alpha, spacing, 700 + i * 13)
+    }
+    for (let i = 0; i < 2; i++) {
+      const s0 = left + ((right - left) * i) / 2 - rx * 0.14
+      const s1 = left + ((right - left) * (i + 1)) / 2 + rx * 0.14
+      band(s0, top, s1, bot, rng.gauss(0, 0.13), alpha * 0.6, spacing * 1.6, 940 + i * 17)
+    }
+    // A half-offset set of rows on top, so the band joins do not line up and
+    // read as seams across the panel.
+    for (let i = 0; i < rows; i++) {
+      const t0 = top + ((bot - top) * (i + 0.5)) / rows - ry * 0.1
+      const t1 = top + ((bot - top) * (i + 1.5)) / rows + ry * 0.1
+      band(left, t0, right, t1, Math.PI / 2 + rng.gauss(0, 0.14), alpha * 0.5, spacing * 1.9, 1180 + i * 23)
+    }
+
+    // Soft colour patches inside the panel. Each fades to nothing at its own
+    // rim, so it sits in the wash rather than being pasted over it.
+    const patch = (tint: Hsl, fx: number, fy: number, fr: number, lane: number): void => {
+      const px = cx + rx * fx
+      const py = cy + ry * fy
+      const pr = rx * fr
+      const qr = ry * fr * rng.range(0.75, 1.25)
+      const region = blob(px, py, pr, qr, this.noise, {
+        n: 2, steps: 40, wobble: 0.24, lumps: 2.6, lane,
+      })
+      this.hatch(region, {
+        color: tint,
+        alpha: alpha * 1.5,
+        spacing: spacing * 1.1,
+        angle: rng.range(-Math.PI, Math.PI),
+        layers: 1,
+        clipTo: [panel],
+        pressure: (x, y) => {
+          const t = Math.hypot((x - px) / pr, (y - py) / qr)
+          return clamp(1 - t, 0, 1) ** 1.3 * (0.7 + this.noise.at(x * 0.02, y * 0.02) * 0.4)
+        },
+        curve: 2.8,
+        gaps: 0.5,
+        hueJitter: 7,
+        lane: lane * 3,
+      })
+    }
+
+    // Warm to one side, cool-green to the other, as the reference has it —
+    // mirrored at random so the sheet does not repeat one layout 256 times.
+    const side = rng.bool(0.5) ? -1 : 1
+    patch(warm, side * rng.range(0.42, 0.62), rng.range(-0.1, 0.24), rng.range(0.3, 0.44), 63)
+    patch(alt, -side * rng.range(0.36, 0.6), rng.range(-0.3, 0.12), rng.range(0.26, 0.4), 87)
   }
 
   /**

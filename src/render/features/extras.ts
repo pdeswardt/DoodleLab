@@ -8,7 +8,7 @@
  */
 
 import { adjust, shade, tint, hsl, clamp, ground } from '../../core/color'
-import type { Genome, GlassesStyle, HatStyle } from '../../core/genome'
+import type { Genome, GlassesSpec } from '../../core/genome'
 import type { Scene } from '../character'
 import { ellipsoidShade } from '../character'
 import type { Pencil } from '../pencil'
@@ -17,32 +17,48 @@ import { drawHood } from './garment'
 
 /* ------------------------------------------------------------------- hats */
 
+/**
+ * Headwear, built from `HatSpec` rather than chosen from a list of drawings.
+ *
+ * Every dimension here comes from the spec, which is rolled per character —
+ * crown width, height, exponent, taper, lean, brim reach and wrap, band, cuff,
+ * seams, points and trim. The style id only decided which region of that space
+ * the numbers were drawn from. Nothing below branches on it.
+ */
 function drawHat(s: Scene): void {
   const { p, g } = s
-  const style: HatStyle = g.extras.hat
-  if (style === 'none') return
+  const h = g.extras.hatSpec
+  if (g.extras.hat === 'none') return
   const b = g.build
   const col = g.extras.hatColor
   const ink = adjust(g.palette.ink, 4, -4)
   const tilt = g.extras.hatTilt
   // Hats ride on the hair rather than on the skull — but only so far. Tall
   // hair used to push the hat clear of the head, leaving it floating.
+  // ...and a shallow hat rides lower than a deep one: a headband or a coronet
+  // sits *around* the skull, so lifting it clear of the hair leaves it hanging
+  // in the air above the head.
   const lift = Math.min(b.headRy * 0.3, b.headRy * (0.06 + g.hair.crown * 0.42))
+    * clamp(h.crownH * 1.6, 0.3, 1)
   // Headwear sits on the skull, and the turn has moved it. Anchoring to the
   // nominal centre left hats floating beside the head.
   const hc = s.headCentre
   const topY = hc.y - b.headRy - lift
   const shading = ellipsoidShade(hc.x, topY + 14, b.headRx * 1.1, b.headRy * 0.7, s.lx, s.ly, 1.2)
 
+  const cw = b.headRx * h.crownW
+  const ch = b.headRy * h.crownH
+  // The line the crown sits on, and the line it rises from.
+  const seatY = topY + b.headRy * h.seat
+  const dir = tilt >= 0 ? 1 : -1
+
   const body = (region: Pt[], alpha = 0.12, smooth = true): void => {
-    s.hatRegion = region
     s.addOccluder('extras', region)
     // Headwear is opaque cloth. Without a base the hair reads straight through
-    // it and the hat looks like a ghost.
-    // Opaque within its own layer. Occlusion removes what is *behind* the
-    // extras layer, but the crown, the brim and the band all live in that same
-    // layer — and translucent pigment lets each show through the others, so a
-    // sunhat's brim had its own crown and the hair bun visible through it.
+    // it and the hat looks like a ghost. Opaque *within its own layer* too:
+    // occlusion removes what is behind the extras layer, but the crown, the
+    // brim and the band all live in that layer, and translucent pigment let
+    // each show through the others.
     p.base(region, ground(col), 0.96, smooth)
     p.hatch(region, {
       color: col, alpha, spacing: 2.4, angle: 0.7 + tilt, layers: 2, layerTurn: 26,
@@ -51,172 +67,211 @@ function drawHat(s: Scene): void {
     p.contour(region, { color: ink, alpha: 0.14, width: 1.35, passes: 2, wobble: 0.7, optional: true, lane: 3004 })
   }
 
-  switch (style) {
-    case 'beanie': {
-      const region = blob(hc.x, topY + b.headRy * 0.3, b.headRx * 1.06, b.headRy * 0.56, p.noise, {
-        n: 2.3, wobble: 0.06, lumps: 2.6, lane: 130, steps: 34,
-      })
-      body(region)
-      // Turn-up.
-      const cuff: Pt[] = [
-        { x: hc.x - b.headRx * 1.06, y: topY + b.headRy * 0.62 },
-        { x: hc.x + b.headRx * 1.06, y: topY + b.headRy * 0.62 },
-        { x: hc.x + b.headRx * 1.02, y: topY + b.headRy * 0.9 },
-        { x: hc.x - b.headRx * 1.02, y: topY + b.headRy * 0.9 },
-      ]
-      p.base(cuff, ground(col, 1.1), 0.96)
-      p.hatch(cuff, { color: tint(col, 0.8), alpha: 0.14, spacing: 2, angle: 1.5, layers: 2, lane: 3008 })
-      p.contour(cuff, { color: ink, alpha: 0.14, width: 1.3, passes: 1, lane: 3010 })
-      // A bobble, sometimes.
-      if (p.rng.bool(0.35)) {
-        const bob = arc(hc.x + tilt * 20, topY - 4, 7, 6.4, 0, Math.PI * 2, 16)
-        p.hatch(bob, { color: g.palette.accent, alpha: 0.14, spacing: 2, angle: 0.4, layers: 2, lane: 3012 })
-        p.contour(bob, { color: ink, alpha: 0.13, width: 1.2, passes: 1, wobble: 1.8, lane: 3014 })
-      }
-      break
-    }
-    case 'beret': {
-      const region = blob(hc.x + tilt * 14, topY + b.headRy * 0.28, b.headRx * 1.16, b.headRy * 0.42, p.noise, {
-        n: 2.6, wobble: 0.08, lumps: 2.4, lane: 131, steps: 34,
-        shape: (a) => 1 + 0.14 * Math.cos(a - tilt),
-      })
-      body(region)
-      p.stroke(arc(hc.x + tilt * 26, topY + 2, 3, 3, 0, Math.PI * 2, 8), {
-        color: ink, alpha: 0.22, width: 2, passes: 2, lane: 3016,
-      })
-      break
-    }
-    case 'cap': {
-      const crown = blob(hc.x, topY + b.headRy * 0.34, b.headRx * 1.02, b.headRy * 0.44, p.noise, {
-        n: 2.4, wobble: 0.05, lumps: 2, lane: 132, steps: 30,
-      })
-      body(crown)
-      const dir = tilt >= 0 ? 1 : -1
-      // A peak curves and tapers; a rectangle reads as a plank.
-      const brim: Pt[] = [
-        ...quad(
-          { x: hc.x + dir * b.headRx * 0.15, y: topY + b.headRy * 0.64 },
-          { x: hc.x + dir * b.headRx * 0.95, y: topY + b.headRy * 0.6 },
-          { x: hc.x + dir * b.headRx * 1.42, y: topY + b.headRy * 0.78 }, 10,
-        ),
-        ...quad(
-          { x: hc.x + dir * b.headRx * 1.42, y: topY + b.headRy * 0.78 },
-          { x: hc.x + dir * b.headRx * 0.9, y: topY + b.headRy * 0.94 },
-          { x: hc.x + dir * b.headRx * 0.15, y: topY + b.headRy * 0.88 }, 10,
-        ).slice(1),
-      ]
-      s.addOccluder('extras', brim)
-      p.base(brim, ground(col), 0.96)
-      p.hatch(brim, { color: shade(col, 0.7), alpha: 0.15, spacing: 2, angle: 0.2, layers: 2, lane: 3018 })
-      p.contour(brim, { color: ink, alpha: 0.15, width: 1.3, passes: 1, lane: 3020 })
-      break
-    }
-    case 'sunhat': {
-      const brim = blob(hc.x, topY + b.headRy * 0.72, b.headRx * 1.85, b.headRy * 0.5, p.noise, {
-        n: 2.1, wobble: 0.07, lumps: 3, lane: 133, steps: 40,
-      })
-      s.addOccluder('extras', brim)
-      p.base(brim, ground(col), 0.96)
-      p.hatch(brim, {
-        color: col, alpha: 0.1, spacing: 2.6, angle: 0.3, layers: 2, layerTurn: 40, lane: 3022,
-        pressure: (_x, y) => clamp(0.3 + Math.abs(y - (topY + b.headRy * 0.72)) / (b.headRy * 0.5), 0, 1),
-      })
-      p.contour(brim, { color: ink, alpha: 0.13, width: 1.35, passes: 2, wobble: 1, lane: 3024 })
-      const crown = blob(hc.x, topY + b.headRy * 0.34, b.headRx * 0.92, b.headRy * 0.42, p.noise, {
-        n: 2.4, wobble: 0.06, lumps: 2, lane: 134, steps: 28,
-      })
-      body(crown, 0.11)
-      // Hatband in the accent colour.
-      p.stroke(arc(hc.x, topY + b.headRy * 0.6, b.headRx * 0.94, b.headRy * 0.14, Math.PI + 0.15, Math.PI * 2 - 0.15, 14), {
-        color: g.palette.accent, alpha: 0.2, width: 5, passes: 1, wobble: 0.5, lane: 3026,
-      })
-      break
-    }
-    case 'band': {
-      const band = arc(hc.x, b.cy - b.headRy * 0.62, b.headRx * 1.02, b.headRy * 0.5, Math.PI + 0.2, Math.PI * 2 - 0.2, 16)
-      p.stroke(band, { color: col, alpha: 0.24, width: 7, passes: 2, wobble: 0.6, lane: 3028 })
-      p.stroke(band, { color: shade(col, 1.4), alpha: 0.12, width: 1.2, passes: 1, wobble: 0.8, lane: 3030 })
-      break
-    }
-    case 'kerchief': {
-      const region = blob(hc.x, topY + b.headRy * 0.38, b.headRx * 1.04, b.headRy * 0.5, p.noise, {
-        n: 2.2, wobble: 0.08, lumps: 2.6, lane: 135, steps: 30,
-      })
-      body(region)
-      // The knot, off to one side.
-      const dir = tilt >= 0 ? 1 : -1
-      const knot = arc(hc.x + dir * b.headRx * 0.95, topY + b.headRy * 0.6, 6, 5, 0, Math.PI * 2, 12)
-      p.hatch(knot, { color: col, alpha: 0.14, spacing: 2, angle: 0.9, layers: 1, lane: 3032 })
-      p.contour(knot, { color: ink, alpha: 0.13, width: 1.2, passes: 1, wobble: 1.4, lane: 3034 })
-      p.fleck(region, tint(col, 1.6), 30, 0.7)
-      break
-    }
-    case 'crown': {
-      // A band that follows the curve of the skull, with points rising from
-      // it. The previous version closed straight across the bottom, which drew
-      // a flat sawtooth strip lying on the head like a paper streamer.
-      const halfW = b.headRx * 0.9
-      const rimY = b.cy - b.headRy * 0.52
-      const rimH = b.headRy * 0.17
-      const peakH = b.headRy * 0.42
-      const spikes = 5
-      // The band dips at the temples, because it is wrapping a round head.
-      const curveAt = (x: number): number =>
-        rimY + ((x - hc.x) / b.headRx) ** 2 * b.headRy * 0.22
+  /* ------------------------------------------------------------ the crown */
 
-      const pts: Pt[] = [
-        { x: hc.x - halfW, y: curveAt(hc.x - halfW) + rimH },
-        { x: hc.x - halfW, y: curveAt(hc.x - halfW) },
-      ]
-      for (let i = 0; i < spikes; i++) {
-        const t = (i + 0.5) / spikes
-        const px = hc.x - halfW + t * halfW * 2
-        const tall = peakH * (0.66 + 0.44 * Math.sin(t * Math.PI))
-        pts.push({ x: px, y: curveAt(px) - tall })
-        if (i < spikes - 1) {
-          const vx = hc.x - halfW + ((i + 1) / spikes) * halfW * 2
-          pts.push({ x: vx, y: curveAt(vx) })
-        }
-      }
-      pts.push({ x: hc.x + halfW, y: curveAt(hc.x + halfW) })
-      pts.push({ x: hc.x + halfW, y: curveAt(hc.x + halfW) + rimH })
+  // Walked as an arc from the left seat, over the top, to the right seat. The
+  // superellipse exponent gives the profile, `taper` narrows or flares it with
+  // height, `lean` pushes the mass to one side, and `peaks` cuts points into
+  // the top edge — which is how a coronet is the same shape as a beanie with
+  // different numbers rather than a different drawing.
+  const sharpPeaks = h.peaks > 0 && h.peakSharp > 0.45
+  const steps = h.peaks > 0 ? Math.max(48, h.peaks * 14) : 44
+  const inv = 2 / h.crownN
+  const crown: Pt[] = []
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+    const ang = Math.PI + t * Math.PI
+    const ct = Math.cos(ang)
+    const st = Math.sin(ang)
+    const sx = Math.sign(ct) * Math.abs(ct) ** inv
+    // Negative over the top of the arc; `up` runs 0 at the seat to 1 at the peak.
+    const sy = Math.sign(st) * Math.abs(st) ** inv
+    const up = -sy
+    let x = hc.x + sx * cw * (1 + (h.taper - 1) * up) + h.lean * cw * up + tilt * ch * up * 0.5
+    let y = seatY - up * ch
+    if (h.peaks > 0) {
+      const phase = t * h.peaks
+      const f = phase - Math.floor(phase)
+      const tri = 1 - Math.abs(f * 2 - 1)
+      y -= b.headRy * h.peakH * tri ** (0.6 + h.peakSharp * 2.4)
+    }
+    // Soft cloth wanders; stiff felt does not.
+    const wob = p.noise.at1(t * h.lumps * 4 + 17.3, 3) * h.slouch
+    x += wob * cw * 0.5
+    y += wob * ch * 0.4
+    crown.push({ x, y })
+  }
+  // Close along the seat, dipping at the temples because the band wraps a
+  // round head — a straight closing edge reads as a paper strip lying on top.
+  for (let i = steps; i >= 0; i--) {
+    const t = i / steps
+    const ct = Math.cos(Math.PI + t * Math.PI)
+    const u = Math.sign(ct) * Math.abs(ct) ** inv
+    // The dip has to be deep enough to read as cloth wrapping a round head.
+    // A shallow one drew every low-crowned hat as a plank lying on the skull.
+    crown.push({ x: hc.x + u * cw, y: seatY + u * u * b.headRy * 0.34 * h.crownW })
+  }
 
-      // Straight segments: the points are the whole shape, and smoothing
-      // rounds them into scallops.
-      body(pts, 0.13, false)
+  /* ------------------------------------------------------------- the brim */
 
-      // Jewels along the band.
-      for (let i = 0; i < 3; i++) {
-        const jx = hc.x + (i - 1) * halfW * 0.55
-        p.stroke(arc(jx, curveAt(jx) + rimH * 0.5, 2.6, 2.6, 0, Math.PI * 2, 9), {
-          color: g.palette.accent, alpha: 0.32, width: 2, passes: 2, lane: 3036 + i,
+  let brimRegion: Pt[] | null = null
+  if (h.brim > 0.02) {
+    const peakDir = dir > 0 ? 0 : Math.PI
+    const pts: Pt[] = []
+    const n = 52
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2
+      // Full reach on the peak side, falling to `brimWrap` behind — one number
+      // covering everything from a cap's single peak to a sunhat's full disc.
+      const front = Math.max(0, Math.cos(a - peakDir))
+      const r = h.crownW * 0.98 + h.brim * (h.brimWrap + (1 - h.brimWrap) * front)
+      const wob = p.noise.at1(i * 0.5 + 41.7, 5) * h.slouch * 0.6
+      pts.push({
+        x: hc.x + Math.cos(a) * b.headRx * (r + wob),
+        // The droop: the near edge of the brim falls, the far edge rises.
+        y: seatY + Math.sin(a) * b.headRy * (h.brimDrop + h.brimCurl * 0.25 * Math.sin(a))
+          + b.headRy * 0.04,
+      })
+    }
+    brimRegion = pts
+  }
+
+  // The brim goes down first so the crown overlaps it, which is what stops the
+  // join reading as two shapes butted together.
+  if (brimRegion) {
+    s.addOccluder('extras', brimRegion)
+    p.base(brimRegion, ground(col), 0.96)
+    p.hatch(brimRegion, {
+      color: shade(col, 0.78), alpha: 0.13, spacing: 2.3, angle: 0.25 + tilt,
+      layers: 2, layerTurn: 38, lane: 3022,
+      pressure: (_x, y) => clamp(0.32 + Math.abs(y - seatY) / Math.max(4, b.headRy * h.brimDrop), 0, 1.1),
+    })
+    p.contour(brimRegion, { color: ink, alpha: 0.14, width: 1.35, passes: 2, wobble: 1, lane: 3024 })
+  }
+
+  s.hatRegion = crown
+  body(crown, 0.12, !sharpPeaks)
+
+  /* ------------------------------------------------- cuff, band and seams */
+
+  if (h.cuff > 0.02) {
+    const cy0 = seatY - b.headRy * h.cuff
+    const cuff: Pt[] = [
+      { x: hc.x - cw * 1.01, y: cy0 },
+      { x: hc.x + cw * 1.01, y: cy0 },
+      { x: hc.x + cw * 0.99, y: seatY + b.headRy * 0.1 },
+      { x: hc.x - cw * 0.99, y: seatY + b.headRy * 0.1 },
+    ]
+    p.base(cuff, ground(col, 1.1), 0.96)
+    p.hatch(cuff, { color: tint(col, 0.8), alpha: 0.14, spacing: 2, angle: 1.5, layers: 2, lane: 3008 })
+    p.contour(cuff, { color: ink, alpha: 0.14, width: 1.3, passes: 1, lane: 3010 })
+  }
+
+  if (h.band > 0.02) {
+    // The band is a ring round the crown, so from the front it bows *down*,
+    // and it has to stay inside the crown it is wrapping. Arcing it upward
+    // over a shallow hat drew a handle standing clear of the shape.
+    const by = seatY - ch * clamp(h.bandY, 0, 0.55) - b.headRy * 0.02
+    p.stroke(
+      arc(hc.x, by, cw * 0.95, Math.min(b.headRy * 0.1, ch * 0.3), 0.2, Math.PI - 0.2, 16),
+      {
+        color: g.palette.accent, alpha: 0.22,
+        width: clamp(ch * h.band, 3, ch * 0.5), passes: 1, wobble: 0.5, lane: 3026,
+      },
+    )
+  }
+
+  for (let i = 0; i < h.seams; i++) {
+    const u = ((i + 1) / (h.seams + 1)) * 2 - 1
+    const x0 = hc.x + u * cw * 0.9
+    p.stroke([
+      { x: hc.x + u * cw * h.taper * 0.55 + h.lean * cw, y: seatY - ch * 0.94 },
+      { x: x0, y: seatY - ch * 0.05 },
+    ], { color: shade(col, 0.6), alpha: 0.13, width: 1.1, passes: 1, wobble: 0.8, taper: 0.7, lane: 3040 + i })
+  }
+
+  /* -------------------------------------------------------------- the trim */
+
+  // One decorative extra, placed by angle round the crown, sized by its own
+  // scale. Rolled independently of the family, so a bobble can turn up on a
+  // sunhat and a feather on a beanie.
+  const ta = h.trimAngle
+  const tx = hc.x + Math.cos(ta) * cw * 0.82 + h.lean * cw * 0.4
+  const ty = seatY - ch * (0.5 + 0.5 * Math.max(0, -Math.sin(ta)))
+  const ts = h.trimScale
+  switch (h.trim) {
+    case 'bobble': {
+      const bob = arc(hc.x + h.lean * cw + tilt * 18, seatY - ch - 4 * ts, 7 * ts, 6.4 * ts, 0, Math.PI * 2, 16)
+      p.hatch(bob, { color: g.palette.accent, alpha: 0.14, spacing: 2, angle: 0.4, layers: 2, lane: 3012 })
+      p.contour(bob, { color: ink, alpha: 0.13, width: 1.2, passes: 1, wobble: 1.8, lane: 3014 })
+      break
+    }
+    case 'feather': {
+      const len = ch * 1.5 * ts
+      const spine = quad(
+        { x: tx, y: ty },
+        { x: tx + dir * len * 0.5, y: ty - len * 0.8 },
+        { x: tx + dir * len * 1.15, y: ty - len * 0.5 }, 12,
+      )
+      p.stroke(spine, { color: g.palette.accent, alpha: 0.26, width: 2.4 * ts, passes: 2, wobble: 0.7, taper: 0.85, lane: 3042 })
+      for (let i = 2; i < spine.length - 1; i += 2) {
+        const q = spine[i]!
+        p.stroke([q, { x: q.x - dir * 4 * ts, y: q.y + 5 * ts }], {
+          color: g.palette.accent, alpha: 0.16, width: 1, passes: 1, taper: 0.8, lane: 3044 + i,
         })
       }
       break
     }
-    case 'boat': {
-      // Folded paper: a hull that sits down over the crown, with a peak and a
-      // crease. Three points smoothed into a curve just read as a dart.
-      const halfW = b.headRx * 1.18
-      const sit = topY + b.headRy * 0.42
-      const peak = topY - b.headRy * 0.18
-      const pts: Pt[] = [
-        { x: hc.x - halfW, y: sit },
-        { x: hc.x - halfW * 0.42, y: peak + b.headRy * 0.06 },
-        { x: hc.x, y: peak },
-        { x: hc.x + halfW * 0.42, y: peak + b.headRy * 0.06 },
-        { x: hc.x + halfW, y: sit },
-        { x: hc.x + halfW * 0.62, y: sit + b.headRy * 0.12 },
-        { x: hc.x - halfW * 0.62, y: sit + b.headRy * 0.12 },
+    case 'pin': {
+      const pin = [
+        { x: tx, y: ty - 5 * ts }, { x: tx + 4 * ts, y: ty },
+        { x: tx, y: ty + 5 * ts }, { x: tx - 4 * ts, y: ty },
       ]
-      body(pts, 0.11, false)
-      // The fold.
-      p.stroke([{ x: hc.x, y: peak + 2 }, { x: hc.x + tilt * 6, y: sit + b.headRy * 0.1 }], {
-        color: ink, alpha: 0.16, width: 1.2, passes: 1, wobble: 0.6, lane: 3038,
+      p.base(pin, ground(g.palette.accent), 0.9, false)
+      p.contour(pin, { color: ink, alpha: 0.2, width: 1.2, passes: 1, lane: 3046 })
+      break
+    }
+    case 'stud':
+      p.stroke(arc(tx, ty, 3 * ts, 3 * ts, 0, Math.PI * 2, 10), {
+        color: g.palette.accent, alpha: 0.34, width: 2.4, passes: 2, lane: 3048,
       })
-      p.stroke([{ x: hc.x - halfW * 0.9, y: sit + 1 }, { x: hc.x + halfW * 0.9, y: sit + 1 }], {
-        color: ink, alpha: 0.13, width: 1.2, passes: 1, wobble: 0.8, taper: 0.6, lane: 3039,
-      })
+      break
+    case 'knot': {
+      const kx = hc.x + dir * cw * 0.95
+      const ky = seatY - ch * 0.12
+      const knot = arc(kx, ky, 6 * ts, 5 * ts, 0, Math.PI * 2, 12)
+      p.hatch(knot, { color: col, alpha: 0.14, spacing: 2, angle: 0.9, layers: 1, lane: 3032 })
+      p.contour(knot, { color: ink, alpha: 0.13, width: 1.2, passes: 1, wobble: 1.4, lane: 3034 })
+      // Two tails falling from it.
+      for (const sgn of [-1, 1]) {
+        p.stroke(quad(
+          { x: kx, y: ky },
+          { x: kx + dir * 6 * ts, y: ky + 10 * ts + sgn * 3 },
+          { x: kx + dir * (10 + sgn * 5) * ts, y: ky + 18 * ts }, 8,
+        ), { color: col, alpha: 0.2, width: 3 * ts, passes: 1, wobble: 0.9, taper: 0.8, lane: 3050 + sgn })
+      }
+      break
+    }
+    case 'tassel': {
+      const kx = hc.x + dir * cw * 0.9
+      const ky = seatY - ch * 0.4
+      for (let i = 0; i < 5; i++) {
+        const off = (i - 2) * 1.7 * ts
+        p.stroke([{ x: kx, y: ky }, { x: kx + off + dir * 3, y: ky + 16 * ts }], {
+          color: g.palette.accent, alpha: 0.2, width: 1.4, passes: 1, wobble: 1.2, taper: 0.7, lane: 3054 + i,
+        })
+      }
+      break
+    }
+    case 'jewels': {
+      const n = Math.max(2, Math.min(5, h.peaks > 0 ? h.peaks - 2 : 3))
+      for (let i = 0; i < n; i++) {
+        const u = n === 1 ? 0 : (i / (n - 1)) * 2 - 1
+        const jx = hc.x + u * cw * 0.62
+        p.stroke(arc(jx, seatY - ch * 0.35 + u * u * b.headRy * 0.08, 2.6 * ts, 2.6 * ts, 0, Math.PI * 2, 9), {
+          color: g.palette.accent, alpha: 0.32, width: 2, passes: 2, lane: 3036 + i,
+        })
+      }
       break
     }
     default:
@@ -226,34 +281,48 @@ function drawHat(s: Scene): void {
 
 /* ---------------------------------------------------------------- eyewear */
 
-function lensRegion(style: GlassesStyle, cx: number, cy: number, r: number): Pt[] {
-  switch (style) {
-    case 'square':
-      return [
-        { x: cx - r * 1.15, y: cy - r * 0.85 }, { x: cx + r * 1.15, y: cy - r * 0.9 },
-        { x: cx + r * 1.1, y: cy + r * 0.9 }, { x: cx - r * 1.1, y: cy + r * 0.85 },
-      ]
-    case 'halfmoon':
-      return [
-        { x: cx - r * 1.2, y: cy },
-        ...arc(cx, cy, r * 1.2, r * 0.8, 0.1, Math.PI - 0.1, 12),
-      ]
-    case 'cateye':
-      return [
-        ...arc(cx, cy, r * 1.15, r * 0.9, 0.1, Math.PI * 1.75, 16),
-        { x: cx + r * 1.5, y: cy - r * 1.15 },
-      ]
-    case 'goggles':
-      return arc(cx, cy, r * 1.35, r * 1.1, 0, Math.PI * 2, 22)
-    default:
-      return arc(cx, cy, r * 1.2, r * 1.15, 0, Math.PI * 2, 22)
+/**
+ * One lens outline, built from the spec.
+ *
+ * Round, square, half-moon, cat-eye and goggle are the same superellipse at
+ * different exponents and aspects, with an optional flick at the outer top
+ * corner and an optional cut across the top. They were five fixed point lists,
+ * which is why every pair of round glasses on a sheet was the same pair.
+ */
+function lensRegion(sp: GlassesSpec, cx: number, cy: number, r: number, side: -1 | 1): Pt[] {
+  const inv = 2 / sp.lensN
+  const steps = 26
+  const out: Pt[] = []
+  const cutY = -sp.lensH * r * (1 - sp.halfCut)
+  const ct = Math.cos(sp.lensTilt)
+  const st = Math.sin(sp.lensTilt)
+  for (let i = 0; i < steps; i++) {
+    const a = (i / steps) * Math.PI * 2
+    const ca = Math.cos(a)
+    const sa = Math.sin(a)
+    const sx = Math.sign(ca) * Math.abs(ca) ** inv
+    const sy = Math.sign(sa) * Math.abs(sa) ** inv
+    let x = sx * sp.lensW * r
+    let y = sy * sp.lensH * r
+    if (sp.flick > 0.01) {
+      // Lifted at the outer top corner only, which is the whole of a cat-eye.
+      const up = Math.max(0, -sy)
+      const outward = Math.max(0, sx * side)
+      const k = up * outward ** 1.4
+      y -= sp.flick * r * k
+      x += side * sp.flick * r * 0.7 * k
+    }
+    // The half-moon: everything above the cut line is flattened onto it.
+    if (sp.halfCut > 0.02 && y < cutY) y = cutY
+    out.push({ x: cx + x * ct - y * st, y: cy + x * st + y * ct })
   }
+  return out
 }
 
 function drawGlasses(s: Scene): void {
   const { p, g } = s
-  const style = g.extras.glasses
-  if (style === 'none') return
+  const sp = g.extras.glassesSpec
+  if (g.extras.glasses === 'none') return
   const f = g.face
   const b = g.build
   // Glasses are one of only two things the reference outlines at all, and they
@@ -261,67 +330,80 @@ function drawGlasses(s: Scene): void {
   const ink = g.palette.keyline
   const r = f.eyeR
 
-  const sides: (-1 | 1)[] = style === 'monocle' ? [g.face.gazeX >= 0 ? 1 : -1] : [-1, 1]
+  const sides: (-1 | 1)[] = sp.pair ? [-1, 1] : [g.face.gazeX >= 0 ? 1 : -1]
+  const half = f.eyeSpacing + sp.spread * r
   for (const side of sides) {
-    const cx = b.cx + side * f.eyeSpacing
+    const cx = b.cx + side * half
     const cy = f.eyeY + (side > 0 ? f.asym.eyeDY : 0)
-    const region = lensRegion(style === 'monocle' ? 'round' : style, cx, cy, r)
+    const region = lensRegion(sp, cx, cy, r, side)
     // A lens is glass: a couple of faint strokes, never a fill.
     p.hatch(region, {
-      color: hsl(200, 18, 76), alpha: 0.035, spacing: 3.4, angle: -0.7, layers: 1, gaps: 0.4, lane: 3100,
+      color: hsl(200, 18, 76), alpha: 0.035 + sp.tint * 0.09, spacing: 3.4,
+      angle: -0.7, layers: 1, gaps: 0.4, lane: 3100,
     })
     // A fat, closed, near-black frame is the single loudest graphic in the
     // reference. Two translucent passes produced a woolly grey double-line
     // instead, so the frame is now laid as an opaque band: the lens outline
     // offset outward and inward, filled as one ring.
-    const frameW = (style === 'goggles' ? 2.6 : 1.9) * (p.hand.construction > 0.5 ? 1 : 0.8)
+    const frameW = sp.frameW * (p.hand.construction > 0.5 ? 1 : 0.8)
     const c0 = centroid(region)
-    const outer = region.map((q) => {
+    const offsetBy = (k: number): Pt[] => region.map((q) => {
       const dx = q.x - c0.x
       const dy = q.y - c0.y
       const len = Math.hypot(dx, dy) || 1
-      return { x: q.x + (dx / len) * frameW, y: q.y + (dy / len) * frameW }
+      return { x: q.x + (dx / len) * k, y: q.y + (dy / len) * k }
     })
-    const inner = region.map((q) => {
-      const dx = q.x - c0.x
-      const dy = q.y - c0.y
-      const len = Math.hypot(dx, dy) || 1
-      return { x: q.x - (dx / len) * frameW, y: q.y - (dy / len) * frameW }
-    })
-    p.accentRing(outer, inner, ink, 0.86)
+    p.accentRing(offsetBy(frameW), offsetBy(-frameW), ink, 0.86)
     // Highlight streak — a gap left in the tone plus one bright stroke.
     p.stroke([{ x: cx - r * 0.7, y: cy + r * 0.35 }, { x: cx - r * 0.1, y: cy - r * 0.55 }], {
       color: hsl(200, 20, 92), alpha: 0.2, width: 1.6, passes: 1, taper: 0.8, lane: 3108 + side,
     })
   }
 
-  if (style === 'monocle') {
+  if (!sp.pair) {
     const side = sides[0]!
-    const cx = b.cx + side * f.eyeSpacing
+    const cx = b.cx + side * half
     p.stroke(
-      quad({ x: cx + side * r * 1.2, y: f.eyeY + r * 0.6 },
+      quad({ x: cx + side * r * sp.lensW, y: f.eyeY + r * 0.6 },
         { x: cx + side * r * 2.4, y: f.eyeY + r * 3 },
         { x: b.cx + side * b.neckW * 1.2, y: b.neckY + 12 }, 14),
       { color: ink, alpha: 0.16, width: 1.1, passes: 1, wobble: 1, lane: 3112 },
     )
+    return
+  }
+
+  // The bridge. Its height and sag are what separate a flat bar from a
+  // keyhole, and both are per-character.
+  const bx = half - r * sp.lensW * 0.92
+  const by = f.eyeY + r * sp.bridgeY
+  const bridge = sp.bridgeSag > 0.02
+    ? quad({ x: b.cx - bx, y: by }, { x: b.cx, y: by + r * sp.bridgeSag * 2 }, { x: b.cx + bx, y: by }, 10)
+    : [{ x: b.cx - bx, y: by }, { x: b.cx + bx, y: by }]
+  const bridgeW = Math.max(1.2, sp.frameW * 0.95)
+  p.stroke(bridge, { color: ink, alpha: 0.34, width: bridgeW, passes: 1, wobble: 0.3, lane: 3116 })
+  p.accentStroke(bridge, ink, bridgeW * 1.2, 0.8)
+
+  if (sp.strap) {
+    // A strap round the head instead of arms. It passes *behind* the skull, so
+    // what shows is a short band either side running out to the silhouette —
+    // arcing it across the front drew a chinstrap over the cheeks.
+    for (const side of [-1, 1] as const) {
+      p.stroke(
+        [{ x: b.cx + side * (half + r * sp.lensW * 0.9), y: f.eyeY - r * 0.15 },
+          { x: b.cx + side * b.headRx * 1.03, y: f.eyeY - r * 0.4 }],
+        {
+          color: shade(g.palette.garmentAlt, 1.2), alpha: 0.24,
+          width: sp.frameW * 1.6, passes: 1, wobble: 0.5, lane: 3122 + side,
+        },
+      )
+    }
   } else {
-    // Bridge.
-    p.stroke(
-      [{ x: b.cx - f.eyeSpacing + r * 1.1, y: f.eyeY - r * 0.2 },
-        { x: b.cx + f.eyeSpacing - r * 1.1, y: f.eyeY - r * 0.2 }],
-      { color: ink, alpha: 0.34, width: style === 'goggles' ? 3 : 1.8, passes: 1, wobble: 0.3, lane: 3116 },
-    )
-    p.accentStroke(
-      [{ x: b.cx - f.eyeSpacing + r * 1.1, y: f.eyeY - r * 0.2 },
-        { x: b.cx + f.eyeSpacing - r * 1.1, y: f.eyeY - r * 0.2 }],
-      ink, style === 'goggles' ? 3.4 : 2.2, 0.8,
-    )
     // Arms, disappearing behind the head.
     for (const side of [-1, 1] as const) {
       p.stroke(
-        [{ x: b.cx + side * (f.eyeSpacing + r * 1.2), y: f.eyeY - r * 0.3 },
+        [{ x: b.cx + side * (half + r * sp.lensW), y: f.eyeY - r * 0.3 },
           { x: b.cx + side * b.headRx * 1.02, y: f.eyeY - r * 0.1 }],
-        { color: ink, alpha: 0.18, width: 1.4, passes: 1, taper: 0.5, lane: 3120 + side },
+        { color: ink, alpha: 0.18, width: Math.max(1, sp.frameW * 0.7), passes: 1, taper: 0.5, lane: 3120 + side },
       )
     }
   }
@@ -641,7 +723,13 @@ const QUIRK_DRAWERS: Record<string, QuirkDrawer> = {
   'goggles-up': (s, k) => {
     const { p, g } = s
     const b = g.build
-    const y = b.cy - b.headRy * 0.52
+    // Pushed up onto the forehead — unless a hat is already there, in which
+    // case they sit just below its brim. Drawn at the crown under a hat, the
+    // lenses were occluded away and left the strap arcing over the hat on its
+    // own, like a handle.
+    const y = s.hatRegion
+      ? g.face.eyeY - b.headRy * 0.24
+      : b.cy - b.headRy * 0.52
     const ink = adjust(g.palette.ink, -4, 6)
     const r = g.face.eyeR * (1.1 + k * 0.3)
     for (const side of [-1, 1] as const) {

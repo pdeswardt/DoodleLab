@@ -45,6 +45,102 @@ export type PatternStyle = 'none' | 'plaid' | 'stripe' | 'dot' | 'knit' | 'check
 export type GlassesStyle = 'none' | 'round' | 'square' | 'halfmoon' | 'monocle' | 'goggles' | 'cateye'
 export type HatStyle =
   | 'none' | 'beanie' | 'beret' | 'cap' | 'sunhat' | 'band' | 'crown' | 'kerchief' | 'boat'
+/**
+ * Eyewear as parameters, for the same reason headwear is. Four fixed lens
+ * outlines meant every pair of round glasses on a sheet was the *same* pair.
+ * Round, square, half-moon and cat-eye are all one superellipse with a
+ * different exponent, aspect and outer-corner flick.
+ */
+export interface GlassesSpec {
+  id: GlassesStyle
+  /** Lens half-width, x eye radius. */
+  lensW: number
+  /** Lens half-height, x eye radius. */
+  lensH: number
+  /** Superellipse exponent: 2 = round, 4 = rectangular, below 2 = pinched. */
+  lensN: number
+  /** Cat-eye flick at the outer top corner, x eye radius. */
+  flick: number
+  /** Cut the lens off above this height, 0 = whole lens, 1 = half-moon. */
+  halfCut: number
+  /** Tilt of each lens, in radians. */
+  lensTilt: number
+  /** Frame thickness in art units. */
+  frameW: number
+  /** How far past the eye the lens centres sit, x eye radius. */
+  spread: number
+  /** Bridge height relative to the lens centre, x eye radius. */
+  bridgeY: number
+  /** Downward sag of the bridge, x eye radius. A keyhole against a flat bar. */
+  bridgeSag: number
+  /** false = a monocle. */
+  pair: boolean
+  /** A strap round the head instead of arms. */
+  strap: boolean
+  /** How much the glass is tinted, 0 = clear. */
+  tint: number
+}
+
+export type HatTrim =
+  | 'none' | 'bobble' | 'feather' | 'pin' | 'stud' | 'knot' | 'tassel' | 'jewels'
+
+/**
+ * Headwear as parameters rather than as a fixed list of drawings — the same
+ * treatment `HairSpec` already gets.
+ *
+ * Eight hardcoded hat drawings meant every beanie on a sheet was the same
+ * beanie in a different colour. Here the style id only *biases* the numbers
+ * below; the shape itself is built from them, and every one is jittered per
+ * character. A cap is a low crown with a one-sided brim, a sunhat is a small
+ * crown with a wide all-round brim, a coronet is a shallow band with tall
+ * points — they are regions of one parameter space, not separate drawings.
+ */
+export interface HatSpec {
+  id: HatStyle
+  /** Crown half-width, x head half-width. */
+  crownW: number
+  /** Crown height, x head half-height. */
+  crownH: number
+  /** How far down the skull the crown sits, x head half-height. */
+  seat: number
+  /** Superellipse exponent: 2 = dome, 4 = boxy, below 2 = pointed. */
+  crownN: number
+  /** Width at the top relative to the base: below 1 tapers, above 1 flares. */
+  taper: number
+  /** Sideways lean of the crown mass, x head half-width. */
+  lean: number
+  /** Silhouette irregularity — soft cloth against stiff felt. */
+  slouch: number
+  lumps: number
+  /** Brim reach past the crown, x head half-width. 0 = no brim. */
+  brim: number
+  /** 1 = brim all round, 0 = a peak on one side only. */
+  brimWrap: number
+  /** Brim thickness, x head half-height. */
+  brimDrop: number
+  /** Positive droops, negative curls up. */
+  brimCurl: number
+  /** Band height as a fraction of crown height. 0 = none. */
+  band: number
+  /** Where the band sits up the crown; 0 = at the base. */
+  bandY: number
+  /** Points rising from the crown. 0 = none. */
+  peaks: number
+  /** Height of those points, x head half-height. */
+  peakH: number
+  /** 0 = round scallops, 1 = needle points. */
+  peakSharp: number
+  /** Turn-up cuff at the base, x head half-height. 0 = none. */
+  cuff: number
+  /** Seams drawn down the crown. */
+  seams: number
+  /** The one decorative extra. */
+  trim: HatTrim
+  trimScale: number
+  /** Where round the hat the trim sits, in radians. */
+  trimAngle: number
+}
+
 export type FacialHairStyle =
   | 'none' | 'stubble' | 'moustache' | 'goatee' | 'beard' | 'muttonchops' | 'fluff'
 export type HeadShape = 'round' | 'pear' | 'square' | 'egg' | 'acorn' | 'moon'
@@ -228,7 +324,9 @@ export interface Garment {
 
 export interface Extras {
   glasses: GlassesStyle
+  glassesSpec: GlassesSpec
   hat: HatStyle
+  hatSpec: HatSpec
   hatTilt: number
   hatColor: Hsl
   earring: boolean

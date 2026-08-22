@@ -24,9 +24,9 @@ import { clamp } from './color'
 import { archetypeById, ARCHETYPES, type Archetype, type Role } from './archetypes'
 import { rollQuirks, type AppliedQuirk, type QuirkContext } from './quirks'
 import type {
-  BrowStyle, CollarStyle, EyeShape, FacialHairStyle, GlassesStyle, HatStyle,
-  HeadFamily, HeadShape, LidStyle, MouthStyle, NoseStyle, PatternStyle,
-  ShoulderStyle,
+  BrowStyle, CollarStyle, EyeShape, FacialHairStyle, GlassesSpec, GlassesStyle, HatSpec,
+  HatStyle, HatTrim, HeadFamily, HeadShape, LidStyle, MouthStyle, NoseStyle,
+  PatternStyle, ShoulderStyle,
 } from './types'
 
 /* ------------------------------------------------------------- subsystems */
@@ -231,8 +231,10 @@ export interface WardrobeDNA {
   lapel: boolean
   scarf: boolean
   hat: HatStyle
+  hatSpec: HatSpec
   hatTilt: number
   glasses: GlassesStyle
+  glassesSpec: GlassesSpec
   earring: boolean
   necklace: boolean
 }
@@ -725,6 +727,134 @@ export function hairHeight(h: HairDNA): number {
 
 /* ----------------------------------------------------------------- stage 6 */
 
+/**
+ * Family presets for headwear. These are *biases*, not drawings — every field
+ * is jittered per character below, and the fields not named here are rolled
+ * from scratch. Two beanies on the same sheet share a region of the parameter
+ * space and nothing else.
+ */
+const HAT_PRESETS: Record<Exclude<HatStyle, 'none'>, Partial<HatSpec>> = {
+  beanie: {
+    crownW: 1.05, crownH: 0.56, seat: 0.34, crownN: 2.3, taper: 0.9,
+    slouch: 0.09, brim: 0, cuff: 0.2, band: 0, seams: 0,
+  },
+  beret: {
+    crownW: 1.16, crownH: 0.4, seat: 0.28, crownN: 2.7, taper: 1.12,
+    slouch: 0.1, lean: 0.16, brim: 0, cuff: 0, band: 0, seams: 0,
+  },
+  cap: {
+    crownW: 1.02, crownH: 0.46, seat: 0.34, crownN: 2.5, taper: 0.86,
+    slouch: 0.05, brim: 0.5, brimWrap: 0.05, brimDrop: 0.12, brimCurl: 0.18,
+    band: 0, cuff: 0, seams: 3,
+  },
+  sunhat: {
+    crownW: 0.9, crownH: 0.42, seat: 0.34, crownN: 2.4, taper: 0.88,
+    slouch: 0.06, brim: 0.95, brimWrap: 1, brimDrop: 0.2, brimCurl: 0.22,
+    band: 0.34, bandY: 0.06, cuff: 0, seams: 0,
+  },
+  band: {
+    // Sits low enough on the skull to read as something worn round the head
+    // rather than a slab balanced on top of it.
+    crownW: 1.04, crownH: 0.13, seat: 0.5, crownN: 3.4, taper: 1,
+    slouch: 0.04, brim: 0, band: 0, cuff: 0, seams: 0,
+  },
+  crown: {
+    crownW: 0.94, crownH: 0.17, seat: 0.36, crownN: 3.6, taper: 1,
+    slouch: 0.03, brim: 0, band: 0, cuff: 0, seams: 0,
+    peaks: 5, peakH: 0.4, peakSharp: 0.82, trim: 'jewels',
+  },
+  kerchief: {
+    crownW: 1.04, crownH: 0.5, seat: 0.36, crownN: 2.2, taper: 0.95,
+    slouch: 0.12, lumps: 3.2, brim: 0, band: 0, cuff: 0, seams: 0, trim: 'knot',
+  },
+  boat: {
+    crownW: 1.18, crownH: 0.6, seat: 0.42, crownN: 1.55, taper: 0.2,
+    slouch: 0.03, brim: 0.1, brimWrap: 1, brimDrop: 0.07, brimCurl: -0.1,
+    band: 0, cuff: 0, seams: 0,
+  },
+}
+
+const HAT_TRIMS: readonly HatTrim[] = [
+  'none', 'bobble', 'feather', 'pin', 'stud', 'knot', 'tassel', 'jewels',
+]
+
+function genHatSpec(rng: Rng, id: HatStyle, hair: HairDNA, c: Controls): HatSpec {
+  const preset: Partial<HatSpec> = id === 'none' ? {} : HAT_PRESETS[id]
+  // Variation strength scales the spread, so a low-variation sheet still keeps
+  // its families recognisable while a high one pulls them apart.
+  const v = 0.6 + c.variationStrength * 0.9
+  const j = (base: number, spread: number): number => base + rng.gauss(0, spread * v)
+
+  // A hat has to clear whatever is under it.
+  const tall = hairHeight(hair)
+  const crownH = Math.max(0.1, j(preset.crownH ?? rng.range(0.3, 0.62), 0.075) + tall * 0.1)
+  const peaks = preset.peaks ?? (rng.bool(0.12 + c.memorability * 0.1) ? rng.int(3, 9) : 0)
+
+  return {
+    id,
+    crownW: Math.max(0.7, j(preset.crownW ?? rng.range(0.9, 1.2), 0.06)),
+    crownH,
+    seat: clamp(j(preset.seat ?? rng.range(0.22, 0.44), 0.05), 0.1, 0.55),
+    // The exponent is what separates a soft dome from a stiff box, and it was
+    // the same number on every hat of a given family before.
+    crownN: clamp(j(preset.crownN ?? rng.range(1.7, 3.8), 0.34), 1.4, 5),
+    taper: clamp(j(preset.taper ?? rng.range(0.7, 1.2), 0.11), 0.15, 1.45),
+    lean: j(preset.lean ?? 0, 0.09),
+    slouch: clamp(j(preset.slouch ?? rng.range(0.03, 0.14), 0.03), 0, 0.24),
+    lumps: preset.lumps ?? rng.range(1.8, 4),
+    brim: Math.max(0, j(preset.brim ?? (rng.bool(0.45) ? rng.range(0.2, 0.9) : 0), 0.08)),
+    brimWrap: clamp(preset.brimWrap ?? rng.range(0, 1), 0, 1) * rng.range(0.85, 1.15),
+    brimDrop: clamp(j(preset.brimDrop ?? rng.range(0.08, 0.2), 0.03), 0.04, 0.3),
+    brimCurl: j(preset.brimCurl ?? rng.range(-0.25, 0.35), 0.09),
+    band: Math.max(0, preset.band ?? (rng.bool(0.4) ? rng.range(0.16, 0.4) : 0)),
+    bandY: clamp(preset.bandY ?? rng.range(0, 0.4), 0, 0.7),
+    peaks,
+    peakH: Math.max(0.06, j(preset.peakH ?? rng.range(0.1, 0.35), 0.05)),
+    peakSharp: clamp(j(preset.peakSharp ?? rng.next(), 0.14), 0, 1),
+    cuff: Math.max(0, preset.cuff ?? (rng.bool(0.3) ? rng.range(0.1, 0.24) : 0)),
+    seams: preset.seams ?? (rng.bool(0.3) ? rng.int(2, 5) : 0),
+    trim: preset.trim ?? rng.weighted<HatTrim>(
+      HAT_TRIMS.map((t) => [t, t === 'none' ? 3.4 - c.memorability * 1.6 : 1] as const),
+    ),
+    trimScale: rng.range(0.7, 1.5),
+    trimAngle: rng.range(-Math.PI, Math.PI),
+  }
+}
+
+/** Family presets for eyewear. Biases, not drawings — see `HAT_PRESETS`. */
+const GLASSES_PRESETS: Record<Exclude<GlassesStyle, 'none'>, Partial<GlassesSpec>> = {
+  round: { lensW: 1.2, lensH: 1.15, lensN: 2.05, flick: 0, halfCut: 0 },
+  square: { lensW: 1.16, lensH: 0.88, lensN: 4.4, flick: 0, halfCut: 0 },
+  halfmoon: { lensW: 1.2, lensH: 0.8, lensN: 2.4, flick: 0, halfCut: 0.92 },
+  cateye: { lensW: 1.16, lensH: 0.9, lensN: 2.5, flick: 0.6, halfCut: 0 },
+  goggles: { lensW: 1.35, lensH: 1.1, lensN: 2.6, flick: 0, halfCut: 0, frameW: 2.7, strap: true, tint: 0.5 },
+  monocle: { lensW: 1.2, lensH: 1.15, lensN: 2.05, flick: 0, halfCut: 0, pair: false },
+}
+
+function genGlassesSpec(rng: Rng, id: GlassesStyle, c: Controls): GlassesSpec {
+  const preset: Partial<GlassesSpec> = id === 'none' ? {} : GLASSES_PRESETS[id]
+  const v = 0.6 + c.variationStrength * 0.9
+  const j = (base: number, spread: number): number => base + rng.gauss(0, spread * v)
+  return {
+    id,
+    lensW: Math.max(0.7, j(preset.lensW ?? rng.range(1, 1.4), 0.1)),
+    lensH: Math.max(0.5, j(preset.lensH ?? rng.range(0.7, 1.2), 0.09)),
+    // The exponent is what makes one pair round and the next rectangular, and
+    // it used to be a constant per family.
+    lensN: clamp(j(preset.lensN ?? rng.range(2, 4), 0.5), 1.5, 6),
+    flick: Math.max(0, j(preset.flick ?? 0, 0.1)),
+    halfCut: clamp(preset.halfCut ?? 0, 0, 0.95) * rng.range(0.9, 1.05),
+    lensTilt: rng.gauss(0, 0.06),
+    frameW: clamp(j(preset.frameW ?? rng.range(1.4, 2.6), 0.35), 0.9, 3.4),
+    spread: j(preset.spread ?? 0, 0.08),
+    bridgeY: j(preset.bridgeY ?? rng.range(-0.4, 0.1), 0.12),
+    bridgeSag: Math.max(0, j(preset.bridgeSag ?? (rng.bool(0.35) ? rng.range(0.1, 0.4) : 0), 0.06)),
+    pair: preset.pair ?? true,
+    strap: preset.strap ?? rng.bool(0.06),
+    tint: clamp(preset.tint ?? (rng.bool(0.2) ? rng.range(0.2, 0.8) : 0), 0, 1),
+  }
+}
+
 function genWardrobe(rng: Rng, id: IdentityDNA, hair: HairDNA, a: Archetype, c: Controls): WardrobeDNA {
   const collar = rng.weighted<CollarStyle>([
     ['buttonup', 3], ['crew', 2.6], ['vneck', 1.6], ['turtleneck', 1.6],
@@ -776,8 +906,10 @@ function genWardrobe(rng: Rng, id: IdentityDNA, hair: HairDNA, a: Archetype, c: 
     // A scarf over a turtleneck is too much bulk for this silhouette.
     scarf: collar !== 'turtleneck' && rng.bool(0.18 + c.memorability * 0.14),
     hat,
+    hatSpec: genHatSpec(rng.fork('hat'), hat, hair, c),
     hatTilt: rng.gauss(0, 0.13),
     glasses,
+    glassesSpec: genGlassesSpec(rng.fork('glasses'), glasses, c),
     earring: rng.bool(clamp(0.3 - id.morph * 0.16, 0.06, 0.5) + c.memorability * 0.08),
     necklace: rng.bool(0.16),
   }
@@ -1152,7 +1284,27 @@ export function featureVector(dna: CharacterDNA): number[] {
     palette.skin[2] / 60, palette.hair[0] / 240, palette.hair[2] / 60,
     palette.garment[0] / 200, palette.garment[2] / 70,
     wardrobe.collar.length / 10, wardrobe.pattern.length / 10,
+    // Headwear is a silhouette feature and reads before most of the face, so
+    // its shape belongs here — not just which family it came from.
+    ...hatFeatures(wardrobe.hatSpec),
+    // Eyewear is the loudest graphic on the face, so its shape counts too.
+    ...glassesFeatures(wardrobe.glassesSpec),
   ]
+}
+
+/** The parts of a hat that change its silhouette, scaled to the same range. */
+function hatFeatures(h: HatSpec): number[] {
+  if (h.id === 'none') return [0, 0, 0, 0, 0, 0, 0]
+  return [
+    h.crownW * 1.4, h.crownH * 2.2, h.crownN * 0.4, h.taper * 1.2,
+    h.brim * 1.8, h.brimWrap * 0.7, h.peaks * 0.16 + h.peakH * 1.2,
+  ]
+}
+
+/** The parts of a pair of glasses that change their shape. */
+function glassesFeatures(sp: GlassesSpec): number[] {
+  if (sp.id === 'none') return [0, 0, 0, 0]
+  return [sp.lensW * 1.6, sp.lensH * 1.6, sp.lensN * 0.35, sp.flick * 1.4 + sp.halfCut]
 }
 
 export function featureDistance(a: number[], b: number[]): number {
