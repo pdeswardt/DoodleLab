@@ -566,7 +566,10 @@ function drawNose(s: Scene): void {
   // forward with the hook — this is the whole of what made a beak a beak.
   // Only a long ridge earns it: drawn on every nose it is a vertical rule down
   // the middle of every face on the sheet.
-  if (ng.bridge > 2.1 && ng.contour > 0.45) {
+  // A pen has no soft planes to model a bridge with, so the ridge *is* the
+  // nose there and it earns its line at any length.
+  const ridgeGate = 2.1 - p.hand.ink * 1.5
+  if (ng.bridge > ridgeGate && ng.contour > 0.45 - p.hand.ink * 0.3) {
     p.stroke(
       quad(
         { x: cx - fwd * rx * 0.28, y: bridgeTop },
@@ -575,8 +578,10 @@ function drawNose(s: Scene): void {
         12,
       ),
       {
-        color: ink, alpha: 0.06 + ng.contour * 0.14, width: 1.3, passes: 1,
-        wobble: 0.3, taper: 0.6, lane: 1108,
+        color: ink,
+        alpha: (0.06 + ng.contour * 0.14) * (1 + p.hand.ink * 1.5),
+        width: 1.3, passes: 1 + Math.round(p.hand.ink),
+        wobble: 0.3 + p.hand.ink * 0.7, taper: 0.6, lane: 1108,
       },
     )
   }

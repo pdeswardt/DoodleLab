@@ -83,7 +83,9 @@ function expressBuild(dna: CharacterDNA, hand: StyleProfile): Build {
   const cy = 104 + b.cyJitter
   return {
     cx, cy, headRx, headRy,
-    headN: shape.n,
+    // The family's own vertical exponent, pulled toward the shape enum's so
+    // that both still have a say rather than one overriding the other.
+    headN: b.headNy * 0.72 + shape.n * 0.28,
     headNx: b.headNx,
     shape: b.shape,
     family: b.family,

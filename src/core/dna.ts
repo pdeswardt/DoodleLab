@@ -125,6 +125,7 @@ export interface BodyDNA {
   /** Half-width multipliers at crown, upper temple, temple, cheek, jaw, chin. */
   profile: number[]
   headNx: number
+  headNy: number
   headAsym: number
   facet: boolean
   shoulderStyle: ShoulderStyle
@@ -493,11 +494,15 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
     ['wide', 1.5 + Math.max(0, id.mass) * 1.8],
   ])
   const fam = HEAD_FAMILIES[family]
-  const spread = 0.035 + c.variationStrength * 0.055
+  // Uniform across a band around the preset rather than gaussian on top of it.
+  // A normal distribution piles two thirds of every family within one sigma of
+  // the same six numbers, so ten head families produced ten variations on an
+  // oval however wide the tails were made.
+  const spread = 0.075 + c.variationStrength * 0.14
   // The chin gets a higher floor than the rest: a skull can taper a long way
   // and still read as a face, but past a point it stops being one.
   const profile = fam.profile.map((w, i) =>
-    Math.max(i === 5 ? 0.62 : 0.6, w + rng.gauss(0, spread)))
+    Math.max(i === 5 ? 0.62 : 0.6, w + rng.range(-spread, spread)))
 
   const shoulderStyle = rng.weighted<ShoulderStyle>([
     ['sloped', 3],
@@ -535,7 +540,13 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
     shape, headScale,
     family,
     profile,
-    headNx: fam.nx * rng.range(0.9, 1.12),
+    // Both exponents, and both drawn wide. `ny` has been in the family table
+    // since it was written and was read by nothing — the vertical exponent came
+    // from a second, independently rolled enum, so a blocky family could land
+    // on a moon-shaped skull. This is the axis that separates a rectangle from
+    // a long oval, and it was the one axis with no variation at all.
+    headNx: clamp(fam.nx * rng.range(0.72, 1.55), 1.4, 6),
+    headNy: clamp(fam.ny * rng.range(0.72, 1.55), 1.4, 6),
     headAsym: (fam.asym ?? 0) * rng.sign() + rng.gauss(0, 0.022 * v),
     facet: fam.facet ?? false,
     shoulderStyle,
@@ -722,7 +733,9 @@ const NOSE_RANGES: Record<NoseNumeric, Range> = {
   width: [0.8, 1.75],
   tipH: [0.66, 1.45],
   tipDrop: [-0.3, 0.5],
-  bridge: [1, 3.6],
+  // Up to six: a long nose in a doodle runs most of the height of the face,
+  // and the old ceiling of 3.6 could not reach past the eye line.
+  bridge: [1, 6.2],
   hook: [0.2, 0.95],
   upturn: [0.25, 1],
   nostril: [0.5, 1.35],
@@ -732,10 +745,10 @@ const NOSE_RANGES: Record<NoseNumeric, Range> = {
 
 const NOSE_FAMILIES: Record<NoseStyle, Partial<Record<NoseNumeric, Range>>> = {
   button: { width: [0.86, 1.16], tipH: [0.82, 1.15], bridge: [1, 1.9] },
-  beak: { hook: [0.5, 0.95], bridge: [2.2, 3.6], width: [0.7, 1.05], tipDrop: [0.12, 0.5], contour: [0.5, 1] },
+  beak: { hook: [0.5, 0.95], bridge: [2.6, 6.2], width: [0.7, 1.05], tipDrop: [0.12, 0.5], contour: [0.5, 1] },
   upturned: { upturn: [0.55, 1], tipDrop: [-0.35, 0.02], width: [0.85, 1.3] },
   broad: { width: [1.3, 1.8], tipH: [0.85, 1.25], nostril: [0.95, 1.4] },
-  long: { bridge: [2.4, 3.8], tipH: [0.66, 1], tipDrop: [0.2, 0.55] },
+  long: { bridge: [3.4, 6.2], tipH: [0.66, 1], tipDrop: [0.2, 0.55] },
   blob: { width: [1.15, 1.65], tipH: [1.05, 1.5], bridge: [1, 1.7] },
 }
 
@@ -1739,7 +1752,7 @@ export function featureVector(dna: CharacterDNA): number[] {
     body.headScale * 2, body.shoulderSpan * 0.8, body.jaw, body.cheek, body.turn * 0.8,
     face.eyeSize * 6, face.eyeSpacing * 3, face.noseSize, face.mouthW,
     style * 2, hair.curl, hair.crown, hair.sides, body.nib, body.hatchAngle * 0.6,
-    body.profile[2]! * 1.5, body.profile[5]! * 2, body.headNx * 0.5,
+    body.profile[2]! * 1.5, body.profile[5]! * 2, body.headNx * 0.5, body.headNy * 0.5,
     face.featureScale * 1.5, face.eyeY * 4, face.mouthY * 3,
     // Pose and framing: read before any trait, so the anti-clone pass has to
     // be able to act on them.
