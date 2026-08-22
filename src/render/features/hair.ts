@@ -78,21 +78,21 @@ function fillMass(
 
   p.base(region, tint(pal.hair, 1.55), 0.94)
 
-  withClip(p.ctx, [region], () => {
-    // Block the mass in first. Strands alone leave a silhouette full of holes,
-    // which is what makes procedural hair read as wire rather than hair.
-    p.hatch(region, {
+  // Blocked in outside the clip: `hatch` shapes itself to the region, so
+  // wrapping it in a mask as well would cost twice for nothing.
+  p.hatch(region, {
       color: pal.hair,
-      alpha: 0.16,
+      alpha: 0.2,
       spacing: 2.2,
       angle: Math.atan2(b.cy - o.whorl.y, b.cx - o.whorl.x) + 1.5,
-      layers: 3,
-      layerTurn: 20,
+      layers: 2,
+      layerTurn: 30,
       curve: 2.4,
-      lane: o.lane + 700,
-      pressure: (x, y) => 0.55 + form(x, y) * 0.7,
-    })
+    lane: o.lane + 700,
+    pressure: (x, y) => 0.55 + form(x, y) * 0.7,
+  })
 
+  withClip(p.ctx, [region], () => {
     // Base pass.
     for (let i = 0; i < count; i++) {
       const t = i / Math.max(1, count - 1)
@@ -146,17 +146,18 @@ function fillMass(
       })
     }
 
-    // Deep shadow where the mass turns away — straight hatch, since direction
-    // is no longer readable down there.
-    p.hatch(region, {
-      color: shade(pal.hair, 2),
-      alpha: 0.09,
-      spacing: 3,
-      angle: 1.1,
-      layers: 1,
-      lane: o.lane + 900,
-      pressure: (x, y) => clamp((form(x, y) - 0.5) * 2.2, 0, 1),
-    })
+  })
+
+  // Deep shadow where the mass turns away — straight hatch, since direction is
+  // no longer readable down there.
+  p.hatch(region, {
+    color: shade(pal.hair, 2),
+    alpha: 0.09,
+    spacing: 3,
+    angle: 1.1,
+    layers: 1,
+    lane: o.lane + 900,
+    pressure: (x, y) => clamp((form(x, y) - 0.5) * 2.2, 0, 1),
   })
 
   p.contour(region, {

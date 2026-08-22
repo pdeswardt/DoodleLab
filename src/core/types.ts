@@ -86,6 +86,17 @@ export interface Build {
   cheek: number
   chin: number
   tilt: number
+  /** Suggestion of a three-quarter turn, -1 (their right) .. 1. */
+  turn: number
+  /** How large this figure is drawn within its frame. */
+  frameScale: number
+  /** Per-character drawing style — pressure, wrist looseness, hatch direction. */
+  pressure: number
+  lineWobble: number
+  hatchAngle: number
+  finish: number
+  nib: number
+  looseness: number
   neckW: number
   neckY: number
   shoulderY: number

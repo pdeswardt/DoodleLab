@@ -63,6 +63,15 @@ on the sheet using a feature vector weighted toward what a viewer notices first.
 Too close, and the loud subsystems are rerolled while identity and role are
 held. Natural resemblance survives; twins do not.
 
+**Every figure is drawn differently, not just built differently.** One artist
+filling a sheet still varies: some figures are pressed harder, some hatched at
+a different angle, some drawn with a looser wrist or a blunter point, some
+carried further toward a finish. Six of those are per-character parameters —
+pressure, nib width, line looseness, hatch direction, wrist wobble, degree of
+finish — alongside a slight turn of the head and variation in how large the
+figure sits on the page. Without them a population can vary in every trait and
+still look like 256 renders of one drawing.
+
 The full analysis this is built on — what is invariant, what may vary, what is
 forbidden, and the complete dependency graph — is in
 **[ARCHETYPE.md](./ARCHETYPE.md)**.
@@ -81,7 +90,9 @@ a handful of rules taken from how the medium actually behaves:
 3. **Tone is hatched, never filled.** Flat fills read as vector art instantly.
    A hatch line is drawn about as wide as the gap to its neighbour, so tone
    fuses while the grain still shows through — that single relationship is most
-   of the difference between "scribbled" and "shaded".
+   of the difference between "scribbled" and "shaded". How blunt the pencil is
+   varies per character, so some figures fuse into flat tone and others keep
+   every stroke legible.
 4. **Pigment sits on the tooth of the paper.** Every layer is filtered through
    the same grain field.
 5. **Shadows shift hue as they darken.** A shadow on warm skin heads toward
@@ -90,6 +101,11 @@ a handful of rules taken from how the medium actually behaves:
 6. **Highlights are gaps.** Because layers multiply, the only way to get a
    catchlight in an eye is to leave the paper alone, so the iris hatch has a
    pressure function that drops to zero where the light hits.
+7. **Paper is opaque, and it is not white.** Each form is grounded in a pale
+   version of its own colour before anything is hatched on it, which stops the
+   hair behind a head showing through the face and gives the darks something
+   warmer than bare paper to sit on. The tooth is then multiplied over the top
+   at device resolution, so one grain stays one pixel at any zoom.
 
 Form shading comes from one function: an ellipsoid field that returns 0 in the
 light and 1 in the core shadow, easing off at the rim to leave a sliver of
@@ -173,8 +189,16 @@ src/
   main.ts           state, controls, inspector
 ```
 
-A 16×16 sheet generates its genomes in around 130 ms and finishes drawing in
-about 2.5 seconds, filling in visibly rather than behind a spinner.
+A 16×16 sheet generates its 256 genomes in around 130 ms. Drawing them is
+rasterisation-bound and depends on the machine: roughly 2–3 seconds with
+GPU-accelerated canvas, several times that on software rendering. The grid
+fills in visibly while it works rather than sitting behind a spinner, and the
+Quality control trades stroke density for speed.
+
+Hatching does not use clipping. Each hatch line is intersected against the
+region's outline directly and only the inside spans are drawn — clipping every
+line instead is correct but re-applies a mask per draw call, and a sheet
+contains hundreds of thousands of them.
 
 ---
 

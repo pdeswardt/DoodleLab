@@ -16,8 +16,17 @@ import { hsl, type Hsl } from '../core/color'
 const CELL_W = 208
 const CELL_H = Math.round((CELL_W * ART.h) / ART.w)
 
-/** Milliseconds of work per frame — leaves the UI responsive while drawing. */
-const FRAME_BUDGET = 11
+/**
+ * Milliseconds of work per frame.
+ *
+ * This is the sheet's throughput dial, and it matters more than any drawing
+ * optimisation: at 11ms against a 16ms frame the renderer sat idle a third of
+ * the time, and a sheet that needed 3.5s of drawing took 14s of wall clock.
+ * A budget longer than one frame drops the sheet to a lower frame rate while it
+ * works, which is the right trade — nothing is animating, and the grid is
+ * filling in visibly either way.
+ */
+const FRAME_BUDGET = 90
 
 export interface SheetCallbacks {
   onSelect(index: number): void

@@ -120,6 +120,22 @@ export interface IdentityDNA {
 export interface BodyDNA {
   shape: HeadShape
   headScale: number
+  /** Suggestion of a three-quarter turn, -1 (their right) .. 1. */
+  turn: number
+  /** How large this figure is drawn within its frame. */
+  frameScale: number
+  /** How hard this one was pressed. */
+  pressure: number
+  /** How loose the wrist was. */
+  lineWobble: number
+  /** Which way the hatching runs, as an offset in radians. */
+  hatchAngle: number
+  /** How finished it is — heavier contours and firmer edges at the top end. */
+  finish: number
+  /** How blunt the pencil is — fused tone at the top end, visible strokes low. */
+  nib: number
+  /** How broken the line is. */
+  looseness: number
   headRatio: number
   jaw: number
   crown: number
@@ -341,16 +357,16 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
   // Children have proportionally larger heads; that is the single strongest
   // age cue available in a bust.
   const ageHead = id.ageBand === 'child' ? 1.1 : id.ageBand === 'youth' ? 1.04 : 1
-  const headScale = clamp(ageHead * (1 + id.frame * 0.05 + rng.gauss(0, 0.05 * v)), 0.82, 1.24)
+  const headScale = clamp(ageHead * (1 + id.frame * 0.06 + rng.gauss(0, 0.075 * v)), 0.8, 1.26)
 
   // Derived, not sampled: every one of these is a base plus contributions.
   const jaw = clamp(
-    1 + id.frame * 0.1 + id.muscularity * 0.07 + id.mass * 0.11 + id.morph * 0.09 + rng.gauss(0, 0.05 * v),
-    0.74, 1.34,
+    1 + id.frame * 0.14 + id.muscularity * 0.09 + id.mass * 0.14 + id.morph * 0.12 + rng.gauss(0, 0.08 * v),
+    0.7, 1.4,
   )
   const cheek = clamp(
-    1 + id.mass * 0.2 + (id.ageBand === 'child' ? 0.16 : 0) - Math.max(0, id.age - 55) * 0.004 + rng.gauss(0, 0.07 * v),
-    0.76, 1.4,
+    1 + id.mass * 0.26 + (id.ageBand === 'child' ? 0.18 : 0) - Math.max(0, id.age - 55) * 0.005 + rng.gauss(0, 0.1 * v),
+    0.72, 1.46,
   )
   const shoulderSpan = clamp(
     1.95 + id.frame * 0.22 + id.muscularity * 0.16 + id.mass * 0.12 -
@@ -360,17 +376,28 @@ function genBody(rng: Rng, id: IdentityDNA, c: Controls): BodyDNA {
 
   return {
     shape, headScale,
-    headRatio: clamp(1.04 + rng.gauss(0, 0.05 * v) - id.mass * 0.04, 0.9, 1.2),
-    jaw, crown: clamp(1 + rng.gauss(0, 0.06 * v) - id.mass * 0.03, 0.8, 1.24),
+    headRatio: clamp(1.04 + rng.gauss(0, 0.075 * v) - id.mass * 0.05, 0.86, 1.24),
+    jaw, crown: clamp(1 + rng.gauss(0, 0.09 * v) - id.mass * 0.04, 0.76, 1.3),
     cheek,
-    chin: clamp(1 + id.morph * 0.06 + rng.gauss(0, 0.06 * v), 0.84, 1.2),
+    chin: clamp(1 + id.morph * 0.08 + rng.gauss(0, 0.09 * v), 0.8, 1.26),
+    // A slight turn of the head is the cheapest large gain in variety: it moves
+    // every feature at once without changing a single proportion.
+    turn: clamp(rng.gauss(0, 0.34 * v), -0.85, 0.85),
+    // Not every figure is drawn at the same size on the page.
+    frameScale: clamp(rng.gauss(1, 0.055 * v), 0.85, 1.15),
+    pressure: clamp(rng.gauss(1, 0.16), 0.7, 1.4),
+    lineWobble: clamp(rng.gauss(1, 0.28), 0.5, 1.75),
+    hatchAngle: rng.gauss(0, 0.62),
+    finish: clamp(rng.gauss(1, 0.2), 0.6, 1.45),
+    nib: clamp(rng.gauss(0.84, 0.13), 0.58, 1.06),
+    looseness: clamp(rng.gauss(1, 0.34), 0.4, 1.9),
     neck: clamp(0.5 + id.muscularity * 0.09 + id.mass * 0.07 + rng.gauss(0, 0.04 * v), 0.36, 0.72),
     shoulderSpan,
     slope: clamp(0.3 - id.posture * 0.1 + id.muscularity * 0.05 + rng.gauss(0, 0.05), 0.12, 0.48),
     // Posture shows up as a small lean; slumped people tip slightly further.
     tilt: rng.gauss(-id.posture * 0.01, 0.035 + c.variationStrength * 0.04),
-    cxJitter: rng.gauss(0, 2.2 + c.variationStrength * 2.4),
-    cyJitter: rng.gauss(0, 3),
+    cxJitter: rng.gauss(0, 2.6 + c.variationStrength * 3.4),
+    cyJitter: rng.gauss(0, 4.5),
   }
 }
 
@@ -383,7 +410,7 @@ function genFace(rng: Rng, id: IdentityDNA, body: BodyDNA, a: Archetype, c: Cont
 
   // Stylised but consistent: younger faces get larger eyes set lower, which is
   // the same cue the reference uses to read as gentle rather than severe.
-  const eyeSize = clamp(0.175 + young * 0.03 - old * 0.018 + rng.gauss(0, 0.02 * v), 0.12, 0.245)
+  const eyeSize = clamp(0.175 + young * 0.035 - old * 0.02 + rng.gauss(0, 0.03 * v), 0.115, 0.26)
 
   // A tired character is likelier to be caught mid-blink.
   const lid = rng.weighted<LidStyle>([
@@ -428,7 +455,7 @@ function genFace(rng: Rng, id: IdentityDNA, body: BodyDNA, a: Archetype, c: Cont
     eyeSize,
     // Eye spacing follows the width of the face it sits on, rather than being
     // sampled independently of the skull it has to fit inside.
-    eyeSpacing: clamp(0.53 + (body.cheek - 1) * 0.06 + rng.gauss(0, 0.032 * v), 0.42, 0.64),
+    eyeSpacing: clamp(0.53 + (body.cheek - 1) * 0.08 + rng.gauss(0, 0.05 * v), 0.4, 0.68),
     eyeY: clamp(0.09 + young * 0.03 + rng.gauss(0, 0.032 * v), 0.0, 0.19),
     eyeTilt: rng.gauss(0, 0.075 * v),
     lid,
@@ -452,10 +479,10 @@ function genFace(rng: Rng, id: IdentityDNA, body: BodyDNA, a: Archetype, c: Cont
       ['button', 4 + young * 2], ['upturned', 2.2], ['blob', 1.8 + id.mass],
       ['broad', 1.4 + id.mass * 1.2 + id.morph], ['beak', 1.2 + old], ['long', 0.9 + old],
     ]),
-    noseSize: clamp(1 + id.morph * 0.12 + old * 0.12 - young * 0.15 + rng.gauss(0, 0.12 * v), 0.7, 1.45),
+    noseSize: clamp(1 + id.morph * 0.14 + old * 0.14 - young * 0.16 + rng.gauss(0, 0.17 * v), 0.62, 1.55),
     noseY: clamp(0.36 + rng.gauss(0, 0.028 * v), 0.28, 0.45),
     mouth,
-    mouthW: clamp(rng.gauss(1, 0.14 * v), 0.7, 1.45),
+    mouthW: clamp(rng.gauss(1, 0.2 * v), 0.62, 1.55),
     mouthY: clamp(0.58 + rng.gauss(0, 0.03 * v), 0.5, 0.68),
     earSize: clamp(1 + old * 0.16 + rng.gauss(0, 0.11 * v), 0.72, 1.42),
     earTilt: rng.gauss(0, 0.13),
@@ -961,9 +988,9 @@ export function featureVector(dna: CharacterDNA): number[] {
   const { body, face, hair, wardrobe, palette } = dna
   const style = HAIR_STYLES.indexOf(hair.style) / HAIR_STYLES.length
   return [
-    body.headScale * 2, body.shoulderSpan * 0.8, body.jaw, body.cheek,
+    body.headScale * 2, body.shoulderSpan * 0.8, body.jaw, body.cheek, body.turn * 0.8,
     face.eyeSize * 6, face.eyeSpacing * 3, face.noseSize, face.mouthW,
-    style * 2, hair.curl, hair.crown, hair.sides,
+    style * 2, hair.curl, hair.crown, hair.sides, body.nib, body.hatchAngle * 0.6,
     palette.skin[2] / 60, palette.hair[0] / 240, palette.hair[2] / 60,
     palette.garment[0] / 200, palette.garment[2] / 70,
     wardrobe.collar.length / 10, wardrobe.pattern.length / 10,

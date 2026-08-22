@@ -169,9 +169,12 @@ function drawEyes(s: Scene): void {
     // Asymmetry is applied here rather than sampled per eye, so the two eyes
     // differ by a fixed, character-specific amount instead of jittering
     // independently every time the character is drawn.
-    const cx = g.build.cx + side * f.eyeSpacing + rng.gauss(0, 0.4)
+    // The far eye sits closer to the centre line and reads slightly narrower.
+    const turn = turnShift(g)
+    const near = Math.sign(g.build.turn || 1) === side
+    const cx = g.build.cx + turn + side * f.eyeSpacing * (near ? 1 : 1 - Math.abs(g.build.turn) * 0.18) + rng.gauss(0, 0.4)
     const cy = f.eyeY + side * f.eyeTilt * f.eyeSpacing + (side > 0 ? f.asym.eyeDY : 0)
-    const r = f.eyeR * (side > 0 ? 1 + f.asym.eyeDR : 1)
+    const r = f.eyeR * (side > 0 ? 1 + f.asym.eyeDR : 1) * (near ? 1 : 1 - Math.abs(g.build.turn) * 0.12)
     const iris = side < 0 && f.irisAlt ? f.irisAlt : f.iris
     const clouded = f.cloudyEye === side
     drawOneEye(
@@ -183,7 +186,7 @@ function drawEyes(s: Scene): void {
 
   if (f.thirdEye) {
     drawOneEye(
-      p, g, g.build.cx + rng.gauss(0, 1.5), g.build.cy - g.build.headRy * 0.44,
+      p, g, g.build.cx + turnShift(g) + rng.gauss(0, 1.5), g.build.cy - g.build.headRy * 0.44,
       f.eyeR * 0.72, 'open', f.iris, 1, 940,
     )
   }
@@ -198,7 +201,7 @@ function drawBrows(s: Scene): void {
   const col = shade(g.palette.hair, 0.6)
 
   for (const side of [-1, 1] as const) {
-    const cx = g.build.cx + side * f.eyeSpacing
+    const cx = g.build.cx + turnShift(g) + side * f.eyeSpacing
     const cy = f.eyeY - f.eyeR * (1.4 + f.browLift) + (side > 0 ? f.asym.browDY : 0)
     const w = f.eyeR * 1.25
     const lift = f.browAngle * side * 6
@@ -247,7 +250,7 @@ function drawNose(s: Scene): void {
   const { p, g } = s
   const f = g.face
   const b = g.build
-  const cx = b.cx + f.gazeX * 1.6 + f.asym.noseSkew
+  const cx = b.cx + turnShift(g) * 1.35 + f.gazeX * 1.6 + f.asym.noseSkew
   const cy = f.noseY
   const w = b.headRx * 0.11 * f.noseSize
   const h = b.headRy * 0.1 * f.noseSize
@@ -337,7 +340,7 @@ function drawMouth(s: Scene): void {
   const { p, g } = s
   const f = g.face
   const b = g.build
-  const cx = b.cx + f.gazeX * 1.2
+  const cx = b.cx + turnShift(g) * 1.15 + f.gazeX * 1.2
   const cy = f.mouthY
   const w = b.headRx * 0.24 * f.mouthW
   const ink = adjust(g.palette.ink, 2, 8, -6)
@@ -426,7 +429,8 @@ export function drawEars(s: Scene): void {
     const grow = f.bigEar === side ? 1.5 : 1
     const rx = b.headRx * 0.115 * f.earSize * grow
     const ry = b.headRy * 0.165 * f.earSize * grow
-    const cx = b.cx + side * b.headRx * 0.9
+    const near = Math.sign(b.turn || 1) === side
+    const cx = b.cx + side * b.headRx * (near ? 0.9 + Math.abs(b.turn) * 0.05 : 0.9 - Math.abs(b.turn) * 0.14)
     const cy = f.eyeY + b.headRy * 0.06 + (side > 0 ? f.asym.earDY : 0)
     const region = blob(cx, cy, rx, ry, p.noise, {
       wobble: 0.1, lumps: 2, lane: 55 + side, steps: 20,
@@ -663,6 +667,11 @@ function drawScar(s: Scene): void {
       })
     }
   }
+}
+
+/** Horizontal shift every facial feature shares, from the head's turn. */
+export function turnShift(g: Genome): number {
+  return g.build.turn * g.build.headRx * 0.16
 }
 
 export function drawFace(s: Scene): void {

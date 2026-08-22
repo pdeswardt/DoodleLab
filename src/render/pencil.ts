@@ -20,7 +20,10 @@ import { Rng as RngImpl } from '../core/rng'
 import type { Noise } from '../core/noise'
 import { Noise as NoiseImpl } from '../core/noise'
 import { type Hsl, css, adjust, clamp } from '../core/color'
-import { type Pt, resample, normalAt, bounds, centroid, withClip, tracePath } from './shapes'
+import {
+  type Pt, resample, normalAt, bounds, centroid, withClip, tracePath,
+  insideSpans, intersectSpans,
+} from './shapes'
 
 export interface StrokeOptions {
   color: Hsl
@@ -104,6 +107,26 @@ export class Pencil {
   /** gain, compensated for detail — see `press`. */
   private pressure: number
 
+  /**
+   * Per-character drawing style.
+   *
+   * One artist filling a sheet still varies: some figures are pressed harder,
+   * some hatched at a different angle, some drawn with a looser wrist. Without
+   * these three the population can vary in every trait and still look like 256
+   * renders of one drawing.
+   */
+  angleBias = 0
+  wobbleScale = 1
+  finish = 1
+  /**
+   * How blunt the pencil is: the width of a hatch line as a fraction of the gap
+   * to its neighbour. Near 1 the marks fuse into flat tone as if drawn with a
+   * worn-down point; lower and each stroke stays legible as a stroke.
+   */
+  nib = 0.82
+  /** How often the hand lifts. Higher is a sketchier, more broken line. */
+  gapScale = 1
+
   private styleCache = new Map<number, string>()
 
   constructor(ctx: CanvasRenderingContext2D, rng: Rng, noise: Noise, detail = 1, gain = 1.62) {
@@ -162,9 +185,9 @@ export class Pencil {
     const alpha = o.alpha ?? 0.12
     const width = o.width ?? 1.1
     const spread = o.spread ?? 0.55
-    const wobble = o.wobble ?? 0.8
+    const wobble = (o.wobble ?? 0.8) * this.wobbleScale
     const wobbleFreq = o.wobbleFreq ?? 2.4
-    const gaps = o.gaps ?? 0.14
+    const gaps = clamp((o.gaps ?? 0.14) * this.gapScale, 0, 0.85)
     const taper = o.taper ?? 0.45
     const lane = o.lane ?? 0
     const hueJitter = o.hueJitter ?? 2.5
@@ -231,74 +254,126 @@ export class Pencil {
     if (b.w <= 0.5 || b.h <= 0.5) return
 
     const layers = Math.max(1, o.layers ?? 2)
-    const baseSpacing = (o.spacing ?? 2.6) / d
-    const baseAngle = o.angle ?? -0.62
+    // Global density. Coloured pencil at this scale should read as tone, and
+    // tone needs the lines close enough to touch; anything sparser reads as
+    // hatching-as-decoration. Width tracks spacing, so coverage stays constant
+    // and only the texture gets finer.
+    const baseSpacing = (o.spacing ?? 2.6) * 0.6 / d
+    const baseAngle = (o.angle ?? -0.62) + this.angleBias
     const layerTurn = ((o.layerTurn ?? 26) * Math.PI) / 180
     const alpha = o.alpha ?? 0.085
     // A hatch line should be about as wide as the gap to its neighbour. Any
     // narrower and the fill reads as a set of lines; any wider and the grain
     // between them is lost. This single relationship is most of the difference
     // between "scribbled" and "shaded".
-    const width = o.width ?? baseSpacing * 0.82
+    const width = o.width ?? baseSpacing * this.nib
     const curve = o.curve ?? 1.6
     const lane = o.lane ?? 0
     const diag = Math.hypot(b.w, b.h) * 0.5 + 4
+    const hueJitter = o.hueJitter ?? 3
+    const gapChance = clamp((o.gaps ?? 0.2) * this.gapScale, 0, 0.85)
 
-    withClip(this.ctx, [region, ...(o.clipTo ?? [])], () => {
-      for (let L = 0; L < layers; L++) {
-        const a = baseAngle + L * layerTurn
-        const dx = Math.cos(a)
-        const dy = Math.sin(a)
-        const nx = -dy
-        const ny = dx
-        // Later layers sit further apart and lighter, so cross-hatching adds
-        // texture without doubling the density.
-        const spacing = baseSpacing * (1 + L * 0.42)
-        const layerAlpha = alpha * (L === 0 ? 1 : 0.6 / L)
-        const count = Math.ceil((diag * 2) / spacing)
+    const ctx = this.ctx
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    const extra = o.clipTo ?? []
 
-        for (let i = 0; i <= count; i++) {
-          const off = -diag + i * spacing + rng.gauss(0, spacing * 0.2)
-          const mx = b.cx + nx * off
-          const my = b.cy + ny * off
+    for (let L = 0; L < layers; L++) {
+      const a = baseAngle + L * layerTurn
+      const dx = Math.cos(a)
+      const dy = Math.sin(a)
+      const nx = -dy
+      const ny = dx
+      // Later layers sit further apart and lighter, so cross-hatching adds
+      // texture without doubling the density.
+      const spacing = baseSpacing * (1 + L * 0.42)
+      const layerAlpha = alpha * (L === 0 ? 1 : 0.6 / L)
+      const count = Math.ceil((diag * 2) / spacing)
 
-          // Trim the line to the bounding box; anything outside is wasted ink.
-          const span = clipLineToBox(mx, my, dx, dy, b.x - 2, b.y - 2, b.w + 4, b.h + 4)
-          if (!span) continue
+      // Lines are accumulated into a small number of pressure buckets and
+      // stroked as one path each. Issuing a separate draw call per line is
+      // what actually costs — a sheet contains hundreds of thousands of them —
+      // and bucketing by pressure is not a compromise but a better model:
+      // within a bucket the lines share a weight, and darker buckets get a
+      // slightly wider, slightly warmer mark, which is how a pencil behaves
+      // when you lean on it.
+      const BUCKETS = 12
+      const paths: (Path2D | null)[] = new Array(BUCKETS).fill(null)
 
+      for (let i = 0; i <= count; i++) {
+        const lineLane = lane + i * 0.37 + L * 11
+        const off = -diag + i * spacing + rng.gauss(0, spacing * 0.2)
+        const mx = b.cx + nx * off
+        const my = b.cy + ny * off
+
+        // Only the parts of this line that fall inside the shape get drawn.
+        let spans = insideSpans(region, mx, my, dx, dy)
+        if (spans.length === 0) continue
+        for (const other of extra) {
+          spans = intersectSpans(spans, insideSpans(other, mx, my, dx, dy))
+          if (spans.length === 0) break
+        }
+        if (spans.length === 0) continue
+
+        for (const span of spans) {
           const pr = o.pressure
             ? o.pressure(mx + dx * (span[0] + span[1]) * 0.5, my + dy * (span[0] + span[1]) * 0.5)
             : 1
           if (pr <= 0.03) continue
 
+          const weight = pr * rng.range(0.7, 1.3)
+          const bucket = Math.min(BUCKETS - 1, Math.max(0, Math.round(weight * (BUCKETS - 1) / 1.3)))
+          let path = paths[bucket]
+          if (!path) { path = new Path2D(); paths[bucket] = path }
+
           const half = (span[1] - span[0]) * 0.5
           const mid = (span[0] + span[1]) * 0.5
           const bow = rng.gauss(0, curve)
-          const pts: Pt[] = []
-          const segs = 4
-          for (let k = 0; k <= segs; k++) {
-            const s = span[0] + ((span[1] - span[0]) * k) / segs
-            const bend = half > 0.001 ? bow * (1 - ((s - mid) / half) ** 2) : 0
-            pts.push({ x: mx + dx * s + nx * bend, y: my + dy * s + ny * bend })
-          }
+          // Segment count is the real cost of a hatch fill: stroking a
+          // polyline means building its outline geometry, which scales with
+          // points rather than with pixels. Three segments is enough to carry
+          // a bow and a wander; more is invisible at this length.
+          const segs = Math.max(2, Math.min(3, Math.round(half * 0.35)))
+          const step = (span[1] - span[0]) / segs
+          const wob = 0.55 * this.wobbleScale
 
-          this.stroke(pts, {
-            color: o.color,
-            alpha: layerAlpha * pr * rng.range(0.72, 1.26),
-            width,
-            passes: 1,
-            spread: 0.25,
-            wobble: 0.45,
-            wobbleFreq: 3.1,
-            gaps: o.gaps ?? 0.2,
-            taper: o.taper ?? 0.5,
-            step: 4.5,
-            lane: lane + i * 0.37 + L * 11,
-            hueJitter: o.hueJitter ?? 3,
-          })
+          // Trim an end at random: a hand does not start and stop on the mark.
+          const from = segs > 2 && rng.bool(0.4) ? 1 : 0
+          const to = segs > 2 && rng.bool(0.4) ? segs - 1 : segs
+          // An occasional lift in the middle.
+          const lift = segs > 3 && rng.bool(gapChance)
+            ? rng.int(from + 1, Math.max(from + 1, to - 1))
+            : -1
+
+          let penDown = false
+          for (let k = from; k <= to; k++) {
+            const sPos = span[0] + step * k
+            const bend = half > 0.001 ? bow * (1 - ((sPos - mid) / half) ** 2) : 0
+            const wander = this.noise.at1(k * 0.6 + lineLane, L * 3.1) * wob
+            const shift = bend + wander
+            const px = mx + dx * sPos + nx * shift
+            const py = my + dy * sPos + ny * shift
+            if (k === lift) { penDown = false; continue }
+            if (!penDown) { path.moveTo(px, py); penDown = true } else path.lineTo(px, py)
+          }
         }
       }
-    })
+
+      for (let bkt = 0; bkt < BUCKETS; bkt++) {
+        const path = paths[bkt]
+        if (!path) continue
+        const weight = (bkt / (BUCKETS - 1)) * 1.3
+        const alphaHere = layerAlpha * weight * this.pressure
+        if (alphaHere <= 0.004) continue
+        const col = hueJitter > 0
+          ? adjust(o.color, 0, weight * 3 - 2, (bkt - BUCKETS / 2) * hueJitter * 0.35)
+          : o.color
+        ctx.strokeStyle = this.style(col, alphaHere)
+        // Lean harder, leave a wider mark.
+        ctx.lineWidth = width * (0.82 + weight * 0.34)
+        ctx.stroke(path)
+      }
+    }
   }
 
   /**
@@ -324,7 +399,7 @@ export class Pencil {
     }
 
     this.stroke(loop, {
-      alpha: 0.17,
+      alpha: 0.17 * this.finish,
       width: 1.25,
       passes: 2,
       spread: 0.5,
@@ -346,7 +421,10 @@ export class Pencil {
   wash(region: readonly Pt[], o: HatchOptions & { softness?: number }): void {
     const softness = o.softness ?? 1
     this.hatch(region, {
-      spacing: 7 * softness,
+      // Wash marks are ten times the width of a hatch line, so the density
+      // factor that tightens hatching would make this ruinously expensive for
+      // no visible gain — the marks already overlap heavily.
+      spacing: 12 * softness,
       width: 9 * softness,
       alpha: 0.045,
       layers: 2,
@@ -398,40 +476,22 @@ export class Pencil {
   }
 }
 
-/**
- * Slab-clip an infinite line against an axis-aligned box.
- * Returns the [enter, exit] parameters along the direction, or null if missed.
- */
-function clipLineToBox(
-  px: number, py: number, dx: number, dy: number,
-  bx: number, by: number, bw: number, bh: number,
-): [number, number] | null {
-  let t0 = -Infinity
-  let t1 = Infinity
-  const slabs: [number, number, number][] = [
-    [dx, bx - px, bx + bw - px],
-    [dy, by - py, by + bh - py],
-  ]
-  for (const [d, lo, hi] of slabs) {
-    if (Math.abs(d) < 1e-9) {
-      if (lo > 0 || hi < 0) return null
-      continue
-    }
-    let a = lo / d
-    let b = hi / d
-    if (a > b) [a, b] = [b, a]
-    if (a > t0) t0 = a
-    if (b < t1) t1 = b
-    if (t0 > t1) return null
-  }
-  if (!isFinite(t0) || !isFinite(t1) || t1 - t0 < 0.5) return null
-  return [t0, t1]
-}
-
 /* ------------------------------------------------------------------ paper */
 
 let grainTileCache: HTMLCanvasElement | null = null
 let darkGrainCache: HTMLCanvasElement | null = null
+/** Patterns are per-context, and rebuilding one per cell is not free. */
+const patternCache = new WeakMap<CanvasRenderingContext2D, CanvasPattern>()
+
+function cachedPattern(
+  ctx: CanvasRenderingContext2D, tile: HTMLCanvasElement,
+): CanvasPattern | null {
+  const hit = patternCache.get(ctx)
+  if (hit) return hit
+  const made = ctx.createPattern(tile, 'repeat')
+  if (made) patternCache.set(ctx, made)
+  return made
+}
 
 /**
  * The paper tooth. One tile is generated at startup and multiplied over every
@@ -513,10 +573,15 @@ export function grainPigment(
   const pattern = ctx.createPattern(tile, 'repeat')
   if (pattern) {
     ctx.scale(1 / scale, 1 / scale)
-    const o = (offset * 97) % 512
-    ctx.translate(-o, -((offset * 61) % 512))
+    // Offset the tile per cell so the sheet does not show 256 identical grains,
+    // then fill exactly the canvas. Padding the rect by a tile instead would
+    // rasterise ten times the visible area — on a 16x16 sheet that alone cost
+    // more than every pencil mark on the page put together.
+    const ox = (offset * 97) % 512
+    const oy = (offset * 61) % 512
+    ctx.translate(-ox, -oy)
     ctx.fillStyle = pattern
-    ctx.fillRect(0, 0, w * scale + 512, h * scale + 512)
+    ctx.fillRect(ox, oy, w * scale, h * scale)
   }
   ctx.restore()
 }
@@ -539,13 +604,18 @@ export function applyGrain(
   const scale = ctx.getTransform().a || 1
   ctx.globalCompositeOperation = 'multiply'
   ctx.globalAlpha = strength
-  const pattern = ctx.createPattern(tile, 'repeat')
+  const pattern = cachedPattern(ctx, tile)
   if (pattern) {
     ctx.scale(1 / scale, 1 / scale)
-    const o = (offset * 97) % 512
-    ctx.translate(-o, -((offset * 61) % 512))
+    // Offset the tile per cell so the sheet does not show 256 identical grains,
+    // then fill exactly the canvas. Padding the rect by a tile instead would
+    // rasterise ten times the visible area — on a 16x16 sheet that alone cost
+    // more than every pencil mark on the page put together.
+    const ox = (offset * 97) % 512
+    const oy = (offset * 61) % 512
+    ctx.translate(-ox, -oy)
     ctx.fillStyle = pattern
-    ctx.fillRect(0, 0, w * scale + 512, h * scale + 512)
+    ctx.fillRect(ox, oy, w * scale, h * scale)
   }
   ctx.restore()
 }

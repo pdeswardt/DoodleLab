@@ -233,6 +233,67 @@ export function tracePath(
   if (closed) ctx.closePath()
 }
 
+/**
+ * Where an infinite line enters and leaves a polygon.
+ *
+ * Returns the parameters along `(px,py) + t*(dx,dy)` at which the line crosses
+ * an edge, sorted. For a simple polygon these pair up into inside spans, which
+ * is what lets a hatch fill draw only the parts of each line that land inside
+ * the shape — no clip mask required. Clipping every hatch line instead is
+ * correct but ruinously slow: the mask is re-applied per draw call, and a
+ * sheet contains hundreds of thousands of them.
+ */
+export function lineCrossings(
+  poly: readonly Pt[], px: number, py: number, dx: number, dy: number,
+): number[] {
+  const out: number[] = []
+  const n = poly.length
+  for (let i = 0; i < n; i++) {
+    const a = poly[i]!
+    const b = poly[(i + 1) % n]!
+    const ex = b.x - a.x
+    const ey = b.y - a.y
+    const det = ex * dy - dx * ey
+    if (Math.abs(det) < 1e-9) continue
+    const wx = a.x - px
+    const wy = a.y - py
+    const u = (dx * wy - dy * wx) / det
+    if (u < 0 || u > 1) continue
+    out.push((ex * wy - wx * ey) / det)
+  }
+  out.sort((m, q) => m - q)
+  return out
+}
+
+/** Inside spans of a line through a polygon, as [enter, exit] pairs. */
+export function insideSpans(
+  poly: readonly Pt[], px: number, py: number, dx: number, dy: number,
+): [number, number][] {
+  const ts = lineCrossings(poly, px, py, dx, dy)
+  const spans: [number, number][] = []
+  for (let i = 0; i + 1 < ts.length; i += 2) {
+    if (ts[i + 1]! - ts[i]! > 0.4) spans.push([ts[i]!, ts[i + 1]!])
+  }
+  return spans
+}
+
+/** Intersect two sorted span lists. */
+export function intersectSpans(
+  a: readonly [number, number][], b: readonly [number, number][],
+): [number, number][] {
+  const out: [number, number][] = []
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    const lo = Math.max(a[i]![0], b[j]![0])
+    const hi = Math.min(a[i]![1], b[j]![1])
+    if (hi - lo > 0.4) out.push([lo, hi])
+    if (a[i]![1] < b[j]![1]) i++
+    else j++
+  }
+  return out
+}
+
 /** Run `fn` with the context clipped to the intersection of every region. */
 export function withClip(
   ctx: CanvasRenderingContext2D, regions: readonly (readonly Pt[])[], fn: () => void,

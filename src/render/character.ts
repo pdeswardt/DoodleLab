@@ -73,7 +73,7 @@ export function headOutline(g: Genome, noise: Noise): Pt[] {
     wobble: 0.035,
     lumps: 2.2,
     lane: 1,
-    steps: 60,
+    steps: 44,
     // Jaw widens the lower half, crown narrows or broadens the top, cheeks
     // push out at the sides. Together these make six head shapes feel like
     // dozens.
@@ -84,7 +84,9 @@ export function headOutline(g: Genome, noise: Noise): Pt[] {
       const crown = s < 0 ? 1 + (b.crown - 1) * (-s) ** 1.6 : 1
       const cheek = 1 + (b.cheek - 1) * 0.16 * c * (0.5 + 0.5 * s)
       const chin = s > 0.72 ? 1 - (1 - 1 / b.chin) * 0.5 : 1
-      return jaw * crown * cheek * chin
+      // A turned head is wider on the near side and compressed on the far one.
+      const turn = 1 + b.turn * 0.1 * Math.cos(t)
+      return jaw * crown * cheek * chin * turn
     },
   })
 }
@@ -363,8 +365,10 @@ function drawHead(s: Scene): void {
     pressure: (x, y) => clamp((s.headShade(x, y) - 0.55) * 2.4, 0, 1),
   })
 
-  // 4. Warm bounce under the chin and along the lit cheek.
-  p.hatch(head, {
+  // 4. Warm bounce under the chin and along the lit cheek. The subtlest of the
+  //    four layers, so it is skipped at thumbnail density where it would cost
+  //    a quarter of the head's render time and show almost nothing.
+  if (p.detail > 0.75) p.hatch(head, {
     color: tint(adjust(pal.skin, 0, 12, -6), 0.5),
     alpha: 0.05,
     spacing: 3.4,
@@ -414,6 +418,14 @@ export function drawCharacter(
   const rng = new Rng(`${g.seed}::draw::${g.index}`)
   const noise = new Noise(rng.fork('noise'))
   const p = new Pencil(ctx, rng, noise, detail)
+  // The three knobs that make one artist's sheet look like a sheet rather than
+  // like one drawing repeated.
+  p.gain *= g.build.pressure
+  p.wobbleScale = g.build.lineWobble
+  p.angleBias = g.build.hatchAngle
+  p.finish = g.build.finish
+  p.nib = g.build.nib
+  p.gapScale = g.build.looseness
 
   const head = headOutline(g, noise)
   const torso = torsoOutline(g)
@@ -431,9 +443,11 @@ export function drawCharacter(
   // darken what is beneath it.
   ctx.globalCompositeOperation = 'multiply'
 
-  // A slight whole-figure tilt, as if the page were turned a little.
+  // A slight whole-figure tilt, as if the page were turned a little, and a
+  // little variation in how big the figure is drawn on the page.
   ctx.translate(g.build.cx, g.build.cy)
   ctx.rotate(g.build.tilt)
+  ctx.scale(g.build.frameScale, g.build.frameScale)
   ctx.translate(-g.build.cx, -g.build.cy)
 
   // Depth order, back to front. Hair sits behind the head but in *front* of the

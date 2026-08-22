@@ -23,7 +23,7 @@ export function drawCaption(
 
   const boxH = 40
   const boxY = ART.captionY - 26
-  const scale = 3 // supersample, so the mask edge stays crisp when scaled back
+  const scale = 2 // supersample, so the mask edge stays crisp when scaled back
   const off = document.createElement('canvas')
   off.width = Math.round(ART.w * scale)
   off.height = Math.round(boxH * scale)
@@ -44,8 +44,13 @@ export function drawCaption(
   // 1. Lay down pigment across the whole strip.
   const ink = adjust(shade(g.palette.ink, 0.4), 0, 6)
   const pen = new Pencil(octx, p.rng.fork('caption'), p.noise, Math.max(0.8, p.detail))
+  // Hatch only the box the word actually occupies. Covering the full strip and
+  // masking it was costing more than the entire face.
+  const halfW = Math.min(maxW, width) * 0.5 + 3
+  const top = boxH * 0.5 - size * 0.72
   const strip: Pt[] = [
-    { x: 0, y: 0 }, { x: ART.w, y: 0 }, { x: ART.w, y: boxH }, { x: 0, y: boxH },
+    { x: ART.w / 2 - halfW, y: top }, { x: ART.w / 2 + halfW, y: top },
+    { x: ART.w / 2 + halfW, y: top + size * 1.5 }, { x: ART.w / 2 - halfW, y: top + size * 1.5 },
   ]
   pen.hatch(strip, {
     color: ink,
@@ -76,7 +81,7 @@ export function drawCaption(
   ctx.restore()
 
   // 4. A short rule under the word, drawn by hand rather than masked.
-  const half = Math.min(maxW, width) * 0.5 + 4
+  const half = halfW + 1
   const y = boxY + boxH * 0.5 + size * 0.42
   p.stroke(
     [{ x: ART.w / 2 - half, y }, { x: ART.w / 2 + half, y: y + p.rng.gauss(0, 1) }],
