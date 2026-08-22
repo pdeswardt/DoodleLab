@@ -165,12 +165,12 @@ function fillMass(
 
   p.contour(region, {
     color: adjust(shade(pal.hair, 1.6), 0, 0),
-    alpha: 0.2,
-    width: 1.4,
+    alpha: 0.16,
+    width: 1.3,
     passes: 1,
     wobble: 1 + o.curl * 1.6,
     wobbleFreq: 3 + o.curl * 5,
-    gaps: 0.26,
+    gaps: 0.42,
     lane: o.lane + 950,
   })
 }
@@ -198,14 +198,28 @@ function backRegion(s: Scene): Pt[] {
     const t = i / s.head.length
     const height = (pt.y - hc.y) / b.headRy
     const below = clamp(height, 0, 1)
+    // How far round the side of the head this point is. Hair falls at the
+    // sides and passes *behind* the jaw; it does not hang below the chin.
+    const sideness = clamp(Math.abs(pt.x - hc.x) / (b.headRx * 0.85), 0, 1)
     // Growth fades to nothing at the chin. Hair that widens uniformly around
     // the whole skull reads as a hood with a face cut out of it.
     const chinFade = clamp(1 - below ** 1.4, 0, 1)
     const lump = 1 + h.curl * 0.07 * p.noise.at(Math.cos(t * 6.28) * 3, Math.sin(t * 6.28) * 3)
-    return {
-      x: hc.x + (pt.x - hc.x) * (1 + (grow - 1) * chinFade) * lump,
-      y: hc.y + (pt.y - hc.y) * (1 + h.back * 0.06 * chinFade) * lump + below * drop,
+
+    const x = hc.x + (pt.x - hc.x) * (1 + (grow - 1) * chinFade) * lump
+    let y = hc.y + (pt.y - hc.y) * (1 + h.back * 0.06 * chinFade) * lump
+    // The fall is weighted by how far round the side we are, so the lowest
+    // points of the mass are beside the jaw rather than under it. Weighting it
+    // by height alone put the maximum drop exactly at the chin, which — since
+    // the skull already tapers to a point there — pulled the whole mass into a
+    // long spike below the face.
+    y += below * sideness * drop
+    // And the mass never crosses the jaw line in the middle.
+    const jaw = hc.y + b.headRy * 0.62
+    if (Math.abs(x - hc.x) < b.headRx * 0.5 && y > jaw) {
+      y = jaw + (y - jaw) * 0.12
     }
+    return { x, y }
   })
 }
 

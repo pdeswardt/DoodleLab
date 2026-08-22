@@ -491,42 +491,83 @@ export class Pencil {
    * individual strokes.
    */
   /**
-   * A soft field of colour, laid with no strokes at all.
+   * A scrubbed pencil wash: visibly hatched, but reading as tone.
    *
-   * Four attempts at this failed the same way, because it kept being treated
-   * as a stroke problem. Any wash assembled from directional marks whose width
-   * is near their spacing tiles into bars with visible ends — softening the
-   * taper only turns each bar into a lens, and feathering the boundary with
-   * more strokes adds more capsules. The reference's background has no marks in
-   * it: it is a structureless chromatic haze.
+   * Earlier attempts at this tiled into bars, and the cause was never that it
+   * was made of strokes — it was that every stroke was identical. Uniform
+   * pitch, uniform length, round caps, and a width close to the spacing gives
+   * you a row of matching capsules on a regular grid, which is what a bar
+   * field is.
    *
-   * So this lays overlapping soft radial falloffs instead. The tooth pass over
-   * the finished cell is what makes it read as pigment on paper rather than as
-   * an airbrush.
+   * A hand scrubbing a background does none of those things: the marks vary in
+   * length, they start and stop in different places so their ends never line
+   * up, they fan across a range of angles, and they thin out toward the edges
+   * rather than stopping at a boundary. Sampling stroke centres with a radial
+   * bias and letting the outermost ones run past the edge gives the soft
+   * boundary for free, with no feathering pass to go wrong.
    */
-  washField(
+  washHatch(
     cx: number, cy: number, rx: number, ry: number,
-    a: Hsl, b: Hsl, alpha: number, blobs = 5,
+    a: Hsl, b: Hsl, o: {
+      count?: number
+      angle?: number
+      spread?: number
+      alpha?: number
+      width?: number
+      length?: number
+    } = {},
   ): void {
-    const ctx = this.ctx
     const rng = this.rng
-    ctx.save()
-    ctx.globalCompositeOperation = 'multiply'
-    for (let i = 0; i < blobs; i++) {
-      const ox = cx + rng.gauss(0, rx * 0.34)
-      const oy = cy + rng.gauss(0, ry * 0.34)
-      const r = rx * rng.range(0.55, 1.15)
-      const col = i % 2 === 0 ? a : b
-      const grad = ctx.createRadialGradient(ox, oy, r * 0.05, ox, oy, r)
-      grad.addColorStop(0, css(col, alpha * rng.range(0.75, 1.25)))
-      grad.addColorStop(0.55, css(col, alpha * 0.5))
-      grad.addColorStop(1, css(col, 0))
-      ctx.fillStyle = grad
-      ctx.beginPath()
-      ctx.ellipse(ox, oy, r, r * (ry / rx), rng.gauss(0, 0.3), 0, Math.PI * 2)
-      ctx.fill()
+    const count = Math.round((o.count ?? 150) * clamp(this.detail, 0.45, 1.35))
+    const baseAngle = (o.angle ?? 0.35) + this.angleBias
+    const spread = o.spread ?? 0.5
+    const alpha = (o.alpha ?? 0.05) * this.hand.saturation
+    const width = o.width ?? 7
+    const lengthScale = o.length ?? 1
+
+    for (let i = 0; i < count; i++) {
+      // Area-uniform, not centre-biased.
+      //
+      // Biasing density toward the middle seemed right — a dense core thinning
+      // out — but the figure sits on the middle and hides it, so all that was
+      // ever visible was the sparse, faint rim, which read as a starburst of
+      // rays around the head. The patch is even, and only the outer fifth
+      // fades; occlusion takes care of the centre.
+      const t = Math.sqrt(rng.next())
+      const around = rng.next() * Math.PI * 2
+      const px = cx + Math.cos(around) * rx * t
+      const py = cy + Math.sin(around) * ry * t
+
+      const dir = baseAngle + rng.gauss(0, spread)
+      // Length varies by a factor of three, so no two marks end together —
+      // but short enough to read as hatching rather than as rays.
+      const len = rx * rng.range(0.22, 0.62) * lengthScale
+      const dx = Math.cos(dir)
+      const dy = Math.sin(dir)
+      const bow = rng.gauss(0, len * 0.09)
+
+      const pts: Pt[] = []
+      for (let k = 0; k <= 3; k++) {
+        const u = k / 3 - 0.5
+        const bend = bow * (1 - (u * 2) ** 2)
+        pts.push({ x: px + dx * len * u - dy * bend, y: py + dy * len * u + dx * bend })
+      }
+
+      this.stroke(pts, {
+        color: rng.bool(0.5) ? a : b,
+        // Full weight across the patch, fading only in the outer fifth.
+        alpha: alpha * clamp((1 - t) / 0.22, 0, 1) * rng.range(0.65, 1.35),
+        width: width * rng.range(0.6, 1.5),
+        passes: 1,
+        wobble: 1.6,
+        wobbleFreq: 1.6,
+        gaps: 0.3,
+        taper: 0.85,
+        step: 5,
+        hueJitter: 6,
+        lane: 700 + i,
+      })
     }
-    ctx.restore()
   }
 
   /**

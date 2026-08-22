@@ -266,16 +266,17 @@ function drawWash(s: Scene): void {
   const w = g.wash
   const pal = g.palette
 
-  // A field, not strokes.
-  //
-  // In the reference this is what gives each portrait its depth: a soft,
-  // off-square haze behind the figure with no marks in it at all. Every
-  // stroke-based attempt at it produced bars — marks whose width is near their
-  // spacing tile edge to edge, and softening their ends only turns each bar
-  // into a lens. Overlapping radial falloffs give the structureless haze the
-  // reference actually has, and the tooth pass over the finished cell is what
-  // keeps it reading as pigment on paper.
-  p.washField(w.cx, w.cy, w.rx, w.ry, pal.wash, pal.washAlt, 0.66, w.twoTone ? 6 : 4)
+  // The soft pencil hatching behind each figure — the thing that gives the
+  // reference its depth. Scrubbed, not tiled: see `washHatch`.
+  p.washHatch(w.cx, w.cy, w.rx * 1.08, w.ry * 1.08, pal.wash, pal.washAlt, {
+    angle: 0.34 + w.tilt,
+    // Tight angular spread: the marks should read as directional hatching, the
+    // way a hand lays a background in, not as scattered scribble.
+    spread: w.twoTone ? 0.3 : 0.16,
+    count: w.twoTone ? 300 : 250,
+    alpha: 0.1,
+    width: 6,
+  })
 
   // Optional motes: specks of the accent colour floating in the haze.
   const edgeRng = p.rng
