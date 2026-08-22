@@ -618,7 +618,7 @@ export function drawGarment(s: Scene): void {
   const body = ellipsoidShade(b.cx, b.shoulderY + 70, b.shoulderW * 1.05, 110, s.lx, s.ly, 1)
   p.hatch(torso, {
     color: shade(pal.garment, 1.15),
-    alpha: 0.1,
+    alpha: 0.1 * p.hand.modelling,
     spacing: 2.6,
     angle: drape - 0.1,
     layers: 1,

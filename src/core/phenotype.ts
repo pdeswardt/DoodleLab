@@ -10,6 +10,7 @@
 
 import { Rng } from './rng'
 import { hsl, adjust, mix, clamp, type Hsl, type Mood } from './color'
+import { STYLES, type StyleProfile } from './style'
 import { archetypeById } from './archetypes'
 import type { CharacterDNA, Triple } from './dna'
 import { hairHeight } from './dna'
@@ -31,19 +32,23 @@ const HEAD_SHAPES: Record<HeadShape, { n: number; ratio: number }> = {
   moon: { n: 1.9, ratio: 0.94 },
 }
 
-function expressPalette(dna: CharacterDNA): Palette {
+function expressPalette(dna: CharacterDNA, hand: StyleProfile): Palette {
   const p = dna.palette
-  const skin = toHsl(p.skin)
-  const garment = toHsl(p.garment)
+  // Untrained colour runs hot and unmixed; a trained hand keeps a chroma
+  // ladder with one loud accent and everything else held down.
+  const chroma = (c: Hsl, extra = 1): Hsl => hsl(c.h, c.s * hand.saturation * extra, c.l)
+  const skin = chroma(toHsl(p.skin))
+  const garment = chroma(toHsl(p.garment))
   return {
     skin,
     blush: hsl(skin.h - 9, Math.min(70, skin.s + 26), Math.max(38, skin.l - 6)),
-    hair: toHsl(p.hair),
+    hair: chroma(toHsl(p.hair)),
     garment,
-    garmentAlt: toHsl(p.garmentAlt),
+    garmentAlt: chroma(toHsl(p.garmentAlt)),
+    // The accent keeps its chroma at both ends — it is the one loud note.
     accent: toHsl(p.accent),
-    wash: toHsl(p.wash),
-    washAlt: toHsl(p.washAlt),
+    wash: chroma(toHsl(p.wash), 0.85),
+    washAlt: chroma(toHsl(p.washAlt), 0.85),
     // The ink family. Outlines stay cousins of the local colour rather than
     // going black — but there are now several of them, pitched at different
     // depths, because a single ink drawing every edge is what made the coat
@@ -58,10 +63,11 @@ function expressPalette(dna: CharacterDNA): Palette {
   }
 }
 
-function expressBuild(dna: CharacterDNA): Build {
+function expressBuild(dna: CharacterDNA, hand: StyleProfile): Build {
   const b = dna.body
   const shape = HEAD_SHAPES[b.shape]
-  const headRx = 52 * b.headScale
+  // An untrained hand draws the head too big, because the head is what matters.
+  const headRx = 52 * b.headScale * (0.94 + hand.exaggeration * 0.08)
   const headRy = headRx * shape.ratio * b.headRatio * 0.98
   const cx = ART.w / 2 + b.cxJitter
   const cy = 104 + b.cyJitter
@@ -100,16 +106,17 @@ function expressBuild(dna: CharacterDNA): Build {
   }
 }
 
-function expressFace(dna: CharacterDNA, build: Build): Face {
+function expressFace(dna: CharacterDNA, build: Build, hand: StyleProfile): Face {
   const f = dna.face
   const a = f.asym
-  const fs = f.featureScale
+  // ...and the features too, especially the eyes.
+  const fs = f.featureScale * (0.92 + hand.exaggeration * 0.1)
   return {
     eyeShape: f.eyeShape,
     featureScale: fs,
     eyeSpacing: build.headRx * f.eyeSpacing,
     eyeY: build.cy + build.headRy * f.eyeY,
-    eyeR: build.headRx * f.eyeSize * fs,
+    eyeR: build.headRx * f.eyeSize * fs * (0.9 + hand.exaggeration * 0.13),
     eyeTilt: f.eyeTilt,
     lid: f.lid,
     lashes: f.lashes,
@@ -284,15 +291,26 @@ export interface ExpressOptions {
    * they cannot tell you the light moved, only that the page looks incoherent.
    */
   lightAngle?: number
+  /**
+   * Whose hand is drawing.
+   *
+   * Three of the style profile's fields — chroma, proportion exaggeration and
+   * how much form modelling is applied — have to act here rather than at
+   * mark-making time, because they change *what is drawn*, not how a mark is
+   * laid. Left unconsumed, the whole axis collapsed to a pressure multiply and
+   * the two ends differed by 3% of pixels.
+   */
+  hand?: StyleProfile
 }
 
 /** Turn one genotype into one drawable character. */
 export function express(dna: CharacterDNA, o: ExpressOptions): Genome {
   const rng = new Rng(`${dna.masterSeed}#${dna.index}:express`)
   const arch = archetypeById(dna.archetype)
-  const palette = expressPalette(dna)
-  const build = expressBuild(dna)
-  const face = expressFace(dna, build)
+  const hand = o.hand ?? STYLES.adult
+  const palette = expressPalette(dna, hand)
+  const build = expressBuild(dna, hand)
+  const face = expressFace(dna, build, hand)
   const hair = expressHair(dna)
 
   const garment: Garment = {

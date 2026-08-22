@@ -23,7 +23,7 @@ import { type Hsl, css, adjust, clamp } from '../core/color'
 import { STYLES, type StyleProfile } from '../core/style'
 import {
   type Pt, resample, normalAt, bounds, centroid, withClip, tracePath,
-  insideSpans, intersectSpans,
+  insideSpans, intersectSpans, contains,
 } from './shapes'
 
 export interface StrokeOptions {
@@ -82,6 +82,8 @@ export interface ContourOptions extends Omit<StrokeOptions, 'alphaAt'> {
    * an ear, a cheek, a fold. Dropped when the line budget is tight.
    */
   optional?: boolean
+  /** Fade the outline wherever it falls inside this region — it is covered. */
+  hiddenIn?: readonly Pt[]
   /** Direction (radians) in which the outline should press hardest. */
   heavyAngle?: number
   /** How much heavier, 0..1. */
@@ -446,6 +448,13 @@ export class Pencil {
     const closed = o.closed ?? true
     const loop = closed ? [...pts, pts[0]!] : [...pts]
 
+    let hidden: ((t: number) => number) | undefined
+    if (o.hiddenIn && o.hiddenIn.length > 2) {
+      const cover = o.hiddenIn
+      const mask = loop.map((q) => (contains(cover, q.x, q.y) ? 0.12 : 1))
+      hidden = (t: number) => mask[Math.round(clamp(t, 0, 1) * (mask.length - 1))]!
+    }
+
     let alphaAt: ((t: number) => number) | undefined
     if (o.heavyAmount && o.heavyAmount > 0) {
       const c = centroid(pts)
@@ -455,7 +464,10 @@ export class Pencil {
         const ang = Math.atan2(p.y - c.y, p.x - c.x)
         return clamp(1 + amount * Math.cos(ang - heavy), 1 - amount, 1 + amount)
       })
-      alphaAt = (t: number) => weights[Math.round(clamp(t, 0, 1) * (weights.length - 1))]!
+      alphaAt = (t: number) =>
+        weights[Math.round(clamp(t, 0, 1) * (weights.length - 1))]! * (hidden ? hidden(t) : 1)
+    } else if (hidden) {
+      alphaAt = hidden
     }
 
     this.stroke(loop, {

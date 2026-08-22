@@ -256,6 +256,7 @@ export function drawHairBack(s: Scene): void {
   const fallOut = Math.max(0, h.sides - 0.35)
   if (h.back * 0.14 + fallOut * 0.2 > 0.075 || fallOut > 0.12) {
     const region = backRegion(s)
+    s.hairBehind = region
     fillMass(p, g, region, {
       whorl: { x: g.build.cx + h.part * g.build.headRx * 0.4, y: g.build.cy - g.build.headRy * 0.82 },
       from: 0.25,

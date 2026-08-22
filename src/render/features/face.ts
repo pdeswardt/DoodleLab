@@ -106,6 +106,33 @@ function drawOneEye(
     return
   }
 
+  // A child does not construct an eye, they recall the symbol for one: a ring
+  // with a dot in it, drawn the same way every time. No sclera ball, no lid
+  // shadow, no limbal ring, no crease. This is the axis actually changing what
+  // gets drawn rather than how hard it is pressed — which is the only way the
+  // two hands become two drawings instead of one at two pressures.
+  if (p.hand.construction < 0.5) {
+    const ring = arc(cx, cy, rx * 1.05, ry * 1.05, 0, Math.PI * 2, 22)
+    p.base(ring, hsl(pal.skin.h + 12, 8, 95), 0.85)
+    p.contour(ring, {
+      color: ink, alpha: 0.34, width: 2.1, passes: 2, wobble: 0.9, lane: lane + 2,
+    })
+    const dotR = rx * 0.42
+    p.accent(arc(cx + f.gazeX * rx * 0.2, cy + f.gazeY * ry * 0.2, dotR, dotR, 0, Math.PI * 2, 14),
+      pal.keyline, 0.8)
+    if (f.lashes) {
+      for (let i = 0; i < 3; i++) {
+        const a = Math.PI * (1.15 + i * 0.16)
+        p.stroke(
+          [{ x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry },
+            { x: cx + Math.cos(a) * rx * 1.7, y: cy + Math.sin(a) * ry * 1.7 }],
+          { color: ink, alpha: 0.3, width: 1.5, passes: 1, taper: 0.5, lane: lane + 6 + i },
+        )
+      }
+    }
+    return
+  }
+
   const region = applyLids(
     eyeOutline(cx, cy, rx, ry, f.eyeShape, flip as -1 | 1),
     cy, ry, cover.top, cover.bottom,
@@ -422,22 +449,35 @@ function drawBrows(s: Scene): void {
 
     if (spec.hairy) {
       // Individual hairs, laid along the spine and fanning slightly.
-      const hairs = f.brow === 'bushy' ? 11 : f.brow === 'dash' ? 5 : 7
+      // Short marks lying *within* the ribbon, each covering a fraction of its
+      // length. Offsetting a full-length copy of the whole spine once per hair
+      // — which is what this did — produces seven to eleven parallel dashed
+      // lines the width of the brow, and at the focal point of the face that
+      // reads as a barcode rather than as hair.
+      const n = spec.spine.length
+      const hairs = f.brow === 'bushy' ? 16 : f.brow === 'dash' ? 6 : 11
       for (let i = 0; i < hairs; i++) {
-        const t = hairs > 1 ? i / (hairs - 1) : 0.5
-        if (spec.broken && i % 2 === 1) continue
-        const half = spec.widthAt(t)
+        const t0 = rng.range(0, 0.78)
+        const t1 = Math.min(1, t0 + rng.range(0.14, 0.34))
+        const i0 = Math.max(0, Math.floor(t0 * (n - 1)))
+        const i1 = Math.min(n - 1, Math.ceil(t1 * (n - 1)))
+        if (i1 - i0 < 1) continue
+        const half = spec.widthAt((t0 + t1) * 0.5)
         const off = rng.range(-half, half)
-        p.stroke(
-          spec.spine.map((q, k) => {
-            const nm = normalAt(spec.spine, k)
-            return { x: q.x + nm.x * off + rng.gauss(0, 0.5), y: q.y + nm.y * off + rng.gauss(0, 0.5) }
-          }),
-          {
-            color: col, alpha: 0.17, width: 1.4, passes: 1, wobble: 0.45,
-            gaps: spec.broken ? 0.6 : 0.2, taper: 0.65, lane: lane + i,
-          },
-        )
+        // Hairs lie at a slight angle to the ribbon rather than parallel to it.
+        const lean = rng.gauss(0, half * 0.5)
+        const seg: Pt[] = []
+        for (let k = i0; k <= i1; k++) {
+          const u = (k - i0) / Math.max(1, i1 - i0)
+          const nm = normalAt(spec.spine, k)
+          const q = spec.spine[k]!
+          const d = off + lean * (u - 0.5) * 2
+          seg.push({ x: q.x + nm.x * d + rng.gauss(0, 0.35), y: q.y + nm.y * d + rng.gauss(0, 0.35) })
+        }
+        p.stroke(seg, {
+          color: col, alpha: 0.2, width: 1.3, passes: 1, wobble: 0.35,
+          gaps: spec.broken ? 0.5 : 0.12, taper: 0.8, lane: lane + i,
+        })
       }
     } else {
       // A solid mass: hatched across the ribbon, with a firm edge.
@@ -472,6 +512,19 @@ function drawNose(s: Scene): void {
     blob(cx, cy + oy, rx, ry, p.noise, { wobble: 0.07, lumps: 2, lane: 44, steps: 22 })
   const bulbAt = (x: number, y: number, rx: number, ry: number): Pt[] =>
     blob(x, y, rx, ry, p.noise, { wobble: 0.12, lumps: 2, lane: 45, steps: 16 })
+
+  if (p.hand.construction < 0.5) {
+    // The symbol for a nose: a small closed shape and two dots, outlined.
+    const shape = bulb(w * 1.2, h * 1.05)
+    p.hatch(shape, { color: col, alpha: 0.12, spacing: 2, angle: 0.6, layers: 1, lane: 1124 })
+    p.contour(shape, { color: ink, alpha: 0.3, width: 1.8, passes: 2, wobble: 1, lane: 1126 })
+    for (const side of [-1, 1] as const) {
+      p.stroke(arc(cx + side * w * 0.55, cy + h * 0.3, w * 0.16, h * 0.14, 0, Math.PI * 2, 8), {
+        color: ink, alpha: 0.32, width: 1.6, passes: 2, lane: 1130 + side,
+      })
+    }
+    return
+  }
 
   switch (f.nose) {
     case 'beak': {

@@ -36,6 +36,14 @@ export interface Scene {
   /** Head silhouette, the region most features are clipped or anchored to. */
   head: Pt[]
   torso: Pt[]
+  /**
+   * The hair mass drawn behind the head, if any.
+   *
+   * The head's own silhouette must not be outlined where this covers it: a
+   * closed keyline round the whole skull, drawn over the back hair, reads as a
+   * face stuck onto a hair blob rather than as a head with hair behind it.
+   */
+  hairBehind: Pt[] | null
   /** Unit vector pointing toward the light. */
   lx: number
   ly: number
@@ -280,35 +288,37 @@ function drawWash(s: Scene): void {
     })
   }
 
-  // Feather the boundary: short marks straddling the edge, so the wash fades
-  // into the paper instead of stopping at a line.
+  // Feather the boundary.
+  //
+  // Scrub marks that run *along* the edge, the way you would soften a pencil
+  // wash with the side of the lead. Radial strokes with round caps — which is
+  // what this was — render as a ring of identical capsules, and against the
+  // brighter paper that rosette became the second thing the eye landed on.
   const edgeRng = p.rng
-  const feathers = Math.round(44 * clamp(p.detail, 0.5, 1.2))
+  const feathers = Math.round(22 * clamp(p.detail, 0.5, 1.2))
+  const n = region.length
   for (let i = 0; i < feathers; i++) {
-    const t = (i / feathers) * Math.PI * 2 + edgeRng.gauss(0, 0.06)
-    const idx = Math.floor(((t / (Math.PI * 2)) * region.length) % region.length)
-    const a = region[(idx + region.length) % region.length]!
-    const dir = { x: a.x - w.cx, y: a.y - w.cy }
-    const len = Math.hypot(dir.x, dir.y) || 1
-    const ux = dir.x / len
-    const uy = dir.y / len
-    const reach = edgeRng.range(-9, 7)
-    p.stroke(
-      [
-        { x: a.x - ux * 10, y: a.y - uy * 10 },
-        { x: a.x + ux * reach, y: a.y + uy * reach },
-      ],
-      {
-        color: edgeRng.bool(0.5) ? pal.wash : pal.washAlt,
-        alpha: 0.09,
-        width: edgeRng.range(4, 9),
-        passes: 1,
-        wobble: 1.4,
-        gaps: 0.4,
-        taper: 0.9,
-        lane: 40 + i,
-      },
-    )
+    const at = Math.floor(edgeRng.next() * n)
+    const span = edgeRng.int(3, 9)
+    const drift = edgeRng.range(-7, 5)
+    const arcPts: Pt[] = []
+    for (let k = 0; k <= span; k++) {
+      const a = region[(at + k) % n]!
+      const dx = a.x - w.cx
+      const dy = a.y - w.cy
+      const len = Math.hypot(dx, dy) || 1
+      arcPts.push({ x: a.x + (dx / len) * drift, y: a.y + (dy / len) * drift })
+    }
+    p.stroke(arcPts, {
+      color: edgeRng.bool(0.5) ? pal.wash : pal.washAlt,
+      alpha: 0.035,
+      width: edgeRng.range(5, 12),
+      passes: 1,
+      wobble: 2.2,
+      gaps: 0.45,
+      taper: 0.95,
+      lane: 40 + i,
+    })
   }
 
   // Optional motes: specks of the accent colour floating in the haze.
@@ -401,7 +411,7 @@ function drawHead(s: Scene): void {
   // 2. Form shadow.
   p.hatch(head, {
     color: shade(pal.skin, 1),
-    alpha: 0.08,
+    alpha: 0.08 * p.hand.modelling,
     spacing: 2.4,
     angle: -0.5,
     layers: 2,
@@ -415,7 +425,7 @@ function drawHead(s: Scene): void {
   //    the darkest layer to a small area is what keeps the drawing airy.
   p.hatch(head, {
     color: shade(pal.skin, 2.1),
-    alpha: 0.075,
+    alpha: 0.075 * p.hand.modelling,
     width: 1.4,
     spacing: 3.1,
     angle: 0.9,
@@ -430,7 +440,7 @@ function drawHead(s: Scene): void {
   //    a quarter of the head's render time and show almost nothing.
   if (p.detail > 0.75) p.hatch(head, {
     color: tint(adjust(pal.skin, 0, 12, -6), 0.5),
-    alpha: 0.05,
+    alpha: 0.05 * p.hand.modelling,
     spacing: 3.4,
     angle: -1.1,
     layers: 1,
@@ -442,8 +452,11 @@ function drawHead(s: Scene): void {
     },
   })
 
-  // 5. Outline, heaviest where the form turns away.
-  // The one mark in the drawing allowed to be this heavy.
+  // 5. Outline, heaviest where the form turns away — and absent where the hair
+  //    behind the head is already covering that edge. A closed keyline drawn
+  //    round the whole skull over the back hair reads as a face stuck onto a
+  //    hair blob rather than as a head with hair behind it.
+  //    The one mark in the drawing allowed to be this heavy.
   p.contour(head, {
     color: pal.contourInk,
     alpha: 0.24,
@@ -452,6 +465,7 @@ function drawHead(s: Scene): void {
     wobble: 0.6,
     heavyAngle: Math.atan2(-s.ly, -s.lx),
     heavyAmount: 0.55,
+    hiddenIn: s.hairBehind ?? undefined,
     lane: 116,
   })
 }
@@ -493,6 +507,7 @@ export function drawCharacter(
   const s: Scene = {
     p, g, head, torso, lx, ly,
     headCentre: centroid(head),
+    hairBehind: null,
     paper: o.paperTone ?? hsl(42, 32, 96),
     headShade: ellipsoidShade(g.build.cx, g.build.cy - g.build.headRy * 0.08, g.build.headRx, g.build.headRy, lx, ly),
   }

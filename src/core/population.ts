@@ -143,6 +143,7 @@ export function generateSheet(o: SheetOptions): SheetResult {
   // between sheets and stays constant within one — a single artist does not
   // move the lamp between drawings.
   const lightAngle = -Math.PI * 0.72 + (hash01(o.seed) - 0.5) * 0.5
+  const hand = styleAt(o.style ?? 0.85)
   const vectors: number[][] = []
   const characters: Genome[] = []
 
@@ -207,7 +208,7 @@ export function generateSheet(o: SheetOptions): SheetResult {
     }
 
     vectors.push(vec)
-    const g = express(dna, { mood: o.mood, words, lightAngle })
+    const g = express(dna, { mood: o.mood, words, lightAngle, hand })
     characters.push(g)
 
     stats.archetypes[g.archetypeName] = (stats.archetypes[g.archetypeName] ?? 0) + 1
@@ -218,7 +219,7 @@ export function generateSheet(o: SheetOptions): SheetResult {
 
   stats.memorableShare = o.count > 0 ? quirkedSoFar / o.count : 0
   stats.ageMean = o.count > 0 ? stats.ageMean / o.count : 0
-  return { characters, stats, hand: styleAt(o.style ?? 0.85) }
+  return { characters, stats, hand }
 }
 
 /**
@@ -241,7 +242,7 @@ export function generateVariants(
       archetype: mode === 'same-role' ? base.archetype : undefined,
       generation: 101 + i,
     })
-    out.push(express(dna, { mood, words }))
+    out.push(express(dna, { mood, words, hand: styleAt(base.controls ? 0.85 : 0.85) }))
   }
   return out
 }

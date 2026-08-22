@@ -310,6 +310,19 @@ export function intersectSpans(
   return out
 }
 
+/** Ray-crossing test. Used to know when a mark is hidden behind another form. */
+export function contains(poly: readonly Pt[], x: number, y: number): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]!
+    const b = poly[j]!
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
 /** Run `fn` with the context clipped to the intersection of every region. */
 export function withClip(
   ctx: CanvasRenderingContext2D, regions: readonly (readonly Pt[])[], fn: () => void,
