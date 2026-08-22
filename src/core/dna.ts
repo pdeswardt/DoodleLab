@@ -733,45 +733,73 @@ export function hairHeight(h: HairDNA): number {
  * from scratch. Two beanies on the same sheet share a region of the parameter
  * space and nothing else.
  */
-const HAT_PRESETS: Record<Exclude<HatStyle, 'none'>, Partial<HatSpec>> = {
-  beanie: {
-    crownW: 1.05, crownH: 0.56, seat: 0.34, crownN: 2.3, taper: 0.9,
-    slouch: 0.09, brim: 0, cuff: 0.2, band: 0, seams: 0,
-  },
-  beret: {
-    crownW: 1.16, crownH: 0.4, seat: 0.28, crownN: 2.7, taper: 1.12,
-    slouch: 0.1, lean: 0.16, brim: 0, cuff: 0, band: 0, seams: 0,
-  },
-  cap: {
-    crownW: 1.02, crownH: 0.46, seat: 0.34, crownN: 2.5, taper: 0.86,
-    slouch: 0.05, brim: 0.5, brimWrap: 0.05, brimDrop: 0.12, brimCurl: 0.18,
-    band: 0, cuff: 0, seams: 3,
-  },
-  sunhat: {
-    crownW: 0.9, crownH: 0.42, seat: 0.34, crownN: 2.4, taper: 0.88,
-    slouch: 0.06, brim: 0.95, brimWrap: 1, brimDrop: 0.2, brimCurl: 0.22,
-    band: 0.34, bandY: 0.06, cuff: 0, seams: 0,
-  },
-  band: {
-    // Sits low enough on the skull to read as something worn round the head
-    // rather than a slab balanced on top of it.
-    crownW: 1.04, crownH: 0.13, seat: 0.5, crownN: 3.4, taper: 1,
-    slouch: 0.04, brim: 0, band: 0, cuff: 0, seams: 0,
-  },
-  crown: {
-    crownW: 0.94, crownH: 0.17, seat: 0.36, crownN: 3.6, taper: 1,
-    slouch: 0.03, brim: 0, band: 0, cuff: 0, seams: 0,
-    peaks: 5, peakH: 0.4, peakSharp: 0.82, trim: 'jewels',
-  },
-  kerchief: {
-    crownW: 1.04, crownH: 0.5, seat: 0.36, crownN: 2.2, taper: 0.95,
-    slouch: 0.12, lumps: 3.2, brim: 0, band: 0, cuff: 0, seams: 0, trim: 'knot',
-  },
-  boat: {
-    crownW: 1.18, crownH: 0.6, seat: 0.42, crownN: 1.55, taper: 0.2,
-    slouch: 0.03, brim: 0.1, brimWrap: 1, brimDrop: 0.07, brimCurl: -0.1,
-    band: 0, cuff: 0, seams: 0,
-  },
+/** The numeric fields of a hat, which are all drawn from ranges. */
+type HatNumeric =
+  | 'crownW' | 'crownH' | 'seat' | 'crownN' | 'taper' | 'lean' | 'slouch'
+  | 'lumps' | 'brim' | 'brimWrap' | 'brimDrop' | 'brimCurl' | 'brimN'
+  | 'brimAngle' | 'band' | 'bandY' | 'peakH' | 'peakSharp' | 'cuff' | 'dent'
+  | 'trimScale'
+
+type Range = readonly [number, number]
+
+/**
+ * The space every hat is drawn from. Wide on purpose: these are the bounds of
+ * what a hat can be, not the average hat.
+ */
+const HAT_RANGES: Record<HatNumeric, Range> = {
+  crownW: [0.82, 1.32],
+  crownH: [0.12, 0.82],
+  seat: [0.18, 0.56],
+  crownN: [1.5, 4.8],
+  taper: [0.18, 1.42],
+  lean: [-0.3, 0.3],
+  slouch: [0.01, 0.24],
+  lumps: [1.6, 4.4],
+  brim: [0.18, 1.3],
+  brimWrap: [0, 1],
+  // The brim's *half*-thickness, so this is doubled on the page. Any deeper
+  // and the brim is a slab as tall as the crown it hangs off.
+  brimDrop: [0.04, 0.16],
+  brimCurl: [-0.45, 0.55],
+  brimN: [1.7, 5],
+  brimAngle: [-0.24, 0.24],
+  band: [0.14, 0.46],
+  bandY: [0, 0.6],
+  peakH: [0.06, 0.52],
+  peakSharp: [0, 1],
+  cuff: [0.08, 0.32],
+  dent: [0.06, 0.42],
+  trimScale: [0.6, 1.6],
+}
+
+/**
+ * A family constrains only the few numbers that make it that family. A cap is
+ * a fitted crown with a brim on one side; everything else about it — how tall,
+ * how square, how much it leans, whether it has a band, a dent, seams or a
+ * feather — is free.
+ *
+ * This is the difference between varied and merely jittered. Pinning every
+ * field to a preset and adding a few per cent of noise produced two caps that
+ * were plainly the same cap in different colours, which is exactly what the
+ * eight hardcoded drawings did.
+ */
+const HAT_FAMILIES: Record<Exclude<HatStyle, 'none'>, Partial<Record<HatNumeric, Range>>> = {
+  beanie: { brim: [0, 0.03], crownH: [0.4, 0.8], cuff: [0.1, 0.32] },
+  beret: { brim: [0, 0.03], crownH: [0.26, 0.5], taper: [1, 1.4], lean: [-0.3, 0.3] },
+  cap: { brim: [0.38, 0.92], brimWrap: [0, 0.26], crownH: [0.32, 0.66] },
+  sunhat: { brim: [0.7, 1.3], brimWrap: [0.72, 1], crownH: [0.36, 0.72] },
+  band: { brim: [0, 0.03], crownH: [0.08, 0.21], seat: [0.42, 0.58] },
+  crown: { brim: [0, 0.03], crownH: [0.1, 0.28], seat: [0.28, 0.46] },
+  kerchief: { brim: [0, 0.03], crownH: [0.38, 0.68], slouch: [0.1, 0.24] },
+  boat: { crownN: [1.4, 1.85], taper: [0.1, 0.36], brim: [0, 0.24] },
+}
+
+/** Fields a family always has, always lacks, or fixes outright. */
+const HAT_FORCED: Partial<Record<Exclude<HatStyle, 'none'>, Partial<HatSpec>>> = {
+  cap: { seams: 3 },
+  crown: { peaks: 0, trim: 'jewels' },
+  kerchief: { trim: 'knot', seams: 0 },
+  boat: { seams: 0, cuff: 0 },
 }
 
 const HAT_TRIMS: readonly HatTrim[] = [
@@ -779,44 +807,62 @@ const HAT_TRIMS: readonly HatTrim[] = [
 ]
 
 function genHatSpec(rng: Rng, id: HatStyle, hair: HairDNA, c: Controls): HatSpec {
-  const preset: Partial<HatSpec> = id === 'none' ? {} : HAT_PRESETS[id]
-  // Variation strength scales the spread, so a low-variation sheet still keeps
-  // its families recognisable while a high one pulls them apart.
-  const v = 0.6 + c.variationStrength * 0.9
-  const j = (base: number, spread: number): number => base + rng.gauss(0, spread * v)
+  const family: Partial<Record<HatNumeric, Range>> = id === 'none' ? {} : HAT_FAMILIES[id]
+  const forced: Partial<HatSpec> = (id === 'none' ? undefined : HAT_FORCED[id]) ?? {}
+
+  // Uniform across the family's range, not gaussian around its midpoint: a
+  // normal distribution piles most of a sheet into the middle of the range,
+  // which reads as sameness however wide the tails are. Variation strength
+  // pulls each draw toward or away from the midpoint.
+  const bias = 0.45 + c.variationStrength * 0.55
+  const pick = (key: HatNumeric): number => {
+    const [lo, hi] = family[key] ?? HAT_RANGES[key]
+    const mid = (lo + hi) / 2
+    return mid + (rng.range(lo, hi) - mid) * bias
+  }
+  // Zero-inflated: a field a family does not force is often absent entirely,
+  // and that presence or absence is a bigger difference than any amount of it.
+  const maybe = (key: HatNumeric, chance: number): number =>
+    family[key] || rng.bool(chance) ? pick(key) : 0
 
   // A hat has to clear whatever is under it.
   const tall = hairHeight(hair)
-  const crownH = Math.max(0.1, j(preset.crownH ?? rng.range(0.3, 0.62), 0.075) + tall * 0.1)
-  const peaks = preset.peaks ?? (rng.bool(0.12 + c.memorability * 0.1) ? rng.int(3, 9) : 0)
+  const brim = maybe('brim', 0.45)
+  // Points are a coronet feature. Cut into the crown of a brimmed hat they
+  // drew a sunhat with a sawtooth edge, which is not a hat.
+  const peaks = forced.peaks !== undefined
+    ? rng.int(3, 9)
+    : brim < 0.06 && rng.bool(0.16 + c.memorability * 0.12) ? rng.int(3, 9) : 0
 
   return {
     id,
-    crownW: Math.max(0.7, j(preset.crownW ?? rng.range(0.9, 1.2), 0.06)),
-    crownH,
-    seat: clamp(j(preset.seat ?? rng.range(0.22, 0.44), 0.05), 0.1, 0.55),
-    // The exponent is what separates a soft dome from a stiff box, and it was
-    // the same number on every hat of a given family before.
-    crownN: clamp(j(preset.crownN ?? rng.range(1.7, 3.8), 0.34), 1.4, 5),
-    taper: clamp(j(preset.taper ?? rng.range(0.7, 1.2), 0.11), 0.15, 1.45),
-    lean: j(preset.lean ?? 0, 0.09),
-    slouch: clamp(j(preset.slouch ?? rng.range(0.03, 0.14), 0.03), 0, 0.24),
-    lumps: preset.lumps ?? rng.range(1.8, 4),
-    brim: Math.max(0, j(preset.brim ?? (rng.bool(0.45) ? rng.range(0.2, 0.9) : 0), 0.08)),
-    brimWrap: clamp(preset.brimWrap ?? rng.range(0, 1), 0, 1) * rng.range(0.85, 1.15),
-    brimDrop: clamp(j(preset.brimDrop ?? rng.range(0.08, 0.2), 0.03), 0.04, 0.3),
-    brimCurl: j(preset.brimCurl ?? rng.range(-0.25, 0.35), 0.09),
-    band: Math.max(0, preset.band ?? (rng.bool(0.4) ? rng.range(0.16, 0.4) : 0)),
-    bandY: clamp(preset.bandY ?? rng.range(0, 0.4), 0, 0.7),
+    crownW: pick('crownW'),
+    crownH: Math.max(0.08, pick('crownH') + tall * 0.1),
+    seat: clamp(pick('seat'), 0.1, 0.58),
+    crownN: pick('crownN'),
+    taper: pick('taper'),
+    lean: pick('lean'),
+    slouch: pick('slouch'),
+    lumps: pick('lumps'),
+    brim,
+    brimWrap: clamp(pick('brimWrap'), 0, 1),
+    brimDrop: pick('brimDrop'),
+    brimCurl: pick('brimCurl'),
+    brimSide: rng.bool(0.5) ? 1 : -1,
+    brimN: pick('brimN'),
+    brimAngle: pick('brimAngle'),
+    band: maybe('band', 0.34),
+    bandY: pick('bandY'),
     peaks,
-    peakH: Math.max(0.06, j(preset.peakH ?? rng.range(0.1, 0.35), 0.05)),
-    peakSharp: clamp(j(preset.peakSharp ?? rng.next(), 0.14), 0, 1),
-    cuff: Math.max(0, preset.cuff ?? (rng.bool(0.3) ? rng.range(0.1, 0.24) : 0)),
-    seams: preset.seams ?? (rng.bool(0.3) ? rng.int(2, 5) : 0),
-    trim: preset.trim ?? rng.weighted<HatTrim>(
+    peakH: pick('peakH'),
+    peakSharp: pick('peakSharp'),
+    cuff: maybe('cuff', 0.26),
+    dent: maybe('dent', 0.3),
+    seams: forced.seams ?? (rng.bool(0.3) ? rng.int(2, 5) : 0),
+    trim: forced.trim ?? rng.weighted<HatTrim>(
       HAT_TRIMS.map((t) => [t, t === 'none' ? 3.4 - c.memorability * 1.6 : 1] as const),
     ),
-    trimScale: rng.range(0.7, 1.5),
+    trimScale: pick('trimScale'),
     trimAngle: rng.range(-Math.PI, Math.PI),
   }
 }

@@ -134,6 +134,14 @@ export interface HatSpec {
   cuff: number
   /** Seams drawn down the crown. */
   seams: number
+  /** Which side a one-sided brim points. Independent of the hat's tilt. */
+  brimSide: -1 | 1
+  /** Brim outline exponent: 2 = a round disc, 4+ = a squared-off plank. */
+  brimN: number
+  /** Tilt of the brim as a whole, in radians — worn up, level or pulled down. */
+  brimAngle: number
+  /** Crease pressed into the top of the crown, x crown height. */
+  dent: number
   /** The one decorative extra. */
   trim: HatTrim
   trimScale: number

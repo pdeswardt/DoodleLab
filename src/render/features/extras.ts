@@ -9,6 +9,7 @@
 
 import { adjust, shade, tint, hsl, clamp, ground } from '../../core/color'
 import type { Genome, GlassesSpec } from '../../core/genome'
+import { ART } from '../../core/types'
 import type { Scene } from '../character'
 import { ellipsoidShade } from '../character'
 import type { Pencil } from '../pencil'
@@ -33,13 +34,20 @@ function drawHat(s: Scene): void {
   const col = g.extras.hatColor
   const ink = adjust(g.palette.ink, 4, -4)
   const tilt = g.extras.hatTilt
-  // Hats ride on the hair rather than on the skull — but only so far. Tall
-  // hair used to push the hat clear of the head, leaving it floating.
-  // ...and a shallow hat rides lower than a deep one: a headband or a coronet
-  // sits *around* the skull, so lifting it clear of the hair leaves it hanging
-  // in the air above the head.
-  const lift = Math.min(b.headRy * 0.3, b.headRy * (0.06 + g.hair.crown * 0.42))
-    * clamp(h.crownH * 1.6, 0.3, 1)
+  // Two kinds of headwear, and they behave differently. Something you put *on*
+  // your head rides up over the hair; something you wear *round* it does not,
+  // and lifting a headband or a coronet clear of a bun left it hanging in the
+  // air above the head.
+  const sitsOn = h.crownH > 0.3 || h.brim > 0.06
+  // How tall the hair actually stands, buns and mohawks included. Measuring
+  // only the crown left a sunhat sitting on the skull with the top bun
+  // sticking out through it.
+  const standing = g.hair.crown
+    + (g.hair.bun === 'top' || g.hair.bun === 'double' ? 0.6 : 0)
+    + (g.hair.mohawk ? 0.9 : 0)
+  const lift = sitsOn
+    ? Math.min(b.headRy * 0.5, b.headRy * (0.06 + standing * 0.42))
+    : 0
   // Headwear sits on the skull, and the turn has moved it. Anchoring to the
   // nominal centre left hats floating beside the head.
   const hc = s.headCentre
@@ -47,10 +55,39 @@ function drawHat(s: Scene): void {
   const shading = ellipsoidShade(hc.x, topY + 14, b.headRx * 1.1, b.headRy * 0.7, s.lx, s.ly, 1.2)
 
   const cw = b.headRx * h.crownW
-  const ch = b.headRy * h.crownH
-  // The line the crown sits on, and the line it rises from.
-  const seatY = topY + b.headRy * h.seat
-  const dir = tilt >= 0 ? 1 : -1
+  // Deep enough to reach from where it is seated back up over the hair, or the
+  // hat is a brim with a pancake on it floating clear of the head, with the
+  // bun poking out underneath. `topY` already carries the lift, so the depth
+  // is measured from the seat only — adding the lift again here pushed the
+  // whole hat a second lift clear of the head and off the top of the frame.
+  const ch = Math.min(
+    // However tall the roll and the hair make it, a crown taller than this
+    // stops being headwear and becomes the whole picture.
+    b.headRy * 0.62,
+    Math.max(b.headRy * h.crownH, sitsOn ? b.headRy * h.seat * 1.05 : 0),
+  )
+  // The line the crown sits on, and the line it rises from — pushed back down
+  // if a tall hat on tall hair would otherwise run off the top of the picture.
+  const wantSeatY = topY + b.headRy * h.seat
+  // How far the brim reaches sideways, capped so the widest ones stay on the
+  // page rather than running off both edges of the frame.
+  const brimR = h.brim > 0.02
+    ? b.headRx * Math.min(ART.w * 0.42 / b.headRx, h.crownW * 0.98 + h.brim)
+    : 0
+  const reachUp = Math.max(
+    ch + (h.peaks > 0 ? b.headRy * h.peakH : 0),
+    // A tilted brim reaches higher than the crown does, and it is measured
+    // across the brim's own half-width, which is far wider than the crown's.
+    h.brim > 0.02 ? b.headRy * h.brimDrop * 1.3 + Math.abs(h.brimAngle) * brimR : 0,
+  )
+  // The margin has to clear the slouch wobble too, or the crown ends up
+  // touching the top edge of the frame.
+  const margin = 14 + h.slouch * ch
+  const seatY = wantSeatY + Math.max(0, margin - (wantSeatY - reachUp))
+  // Which way a one-sided brim points is its own roll, not a consequence of
+  // how the hat is tilted — tying the two made half the caps on a sheet the
+  // mirror image of the other half and nothing else.
+  const dir = h.brimSide
 
   const body = (region: Pt[], alpha = 0.12, smooth = true): void => {
     s.addOccluder('extras', region)
@@ -95,6 +132,13 @@ function drawHat(s: Scene): void {
       const tri = 1 - Math.abs(f * 2 - 1)
       y -= b.headRy * h.peakH * tri ** (0.6 + h.peakSharp * 2.4)
     }
+    if (h.dent > 0.02) {
+      // A crease pressed into the top of the crown. Two hats of the same
+      // height read as different hats when one of them is dented and the
+      // other is not.
+      const near = Math.exp(-(((x - hc.x) / (cw * 0.42)) ** 2))
+      y += h.dent * ch * near * up
+    }
     // Soft cloth wanders; stiff felt does not.
     const wob = p.noise.at1(t * h.lumps * 4 + 17.3, 3) * h.slouch
     x += wob * cw * 0.5
@@ -107,9 +151,11 @@ function drawHat(s: Scene): void {
     const t = i / steps
     const ct = Math.cos(Math.PI + t * Math.PI)
     const u = Math.sign(ct) * Math.abs(ct) ** inv
-    // The dip has to be deep enough to read as cloth wrapping a round head.
-    // A shallow one drew every low-crowned hat as a plank lying on the skull.
-    crown.push({ x: hc.x + u * cw, y: seatY + u * u * b.headRy * 0.34 * h.crownW })
+    // Deep enough to read as cloth wrapping a round head — but never deeper
+    // than the hat is tall, or a headband curves down over the eyebrows
+    // instead of sitting across the forehead.
+    const dip = Math.min(ch * 1.15, u * u * b.headRy * 0.34 * h.crownW)
+    crown.push({ x: hc.x + u * cw, y: seatY + dip })
   }
 
   /* ------------------------------------------------------------- the brim */
@@ -119,19 +165,31 @@ function drawHat(s: Scene): void {
     const peakDir = dir > 0 ? 0 : Math.PI
     const pts: Pt[] = []
     const n = 52
+    const maxR = brimR / b.headRx
+    const binv = 2 / h.brimN
+    const ba = Math.cos(h.brimAngle)
+    const bb = Math.sin(h.brimAngle)
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2
       // Full reach on the peak side, falling to `brimWrap` behind — one number
       // covering everything from a cap's single peak to a sunhat's full disc.
       const front = Math.max(0, Math.cos(a - peakDir))
-      const r = h.crownW * 0.98 + h.brim * (h.brimWrap + (1 - h.brimWrap) * front)
+      const r = Math.min(
+        maxR,
+        h.crownW * 0.98 + h.brim * (h.brimWrap + (1 - h.brimWrap) * front),
+      )
       const wob = p.noise.at1(i * 0.5 + 41.7, 5) * h.slouch * 0.6
-      pts.push({
-        x: hc.x + Math.cos(a) * b.headRx * (r + wob),
-        // The droop: the near edge of the brim falls, the far edge rises.
-        y: seatY + Math.sin(a) * b.headRy * (h.brimDrop + h.brimCurl * 0.25 * Math.sin(a))
-          + b.headRy * 0.04,
-      })
+      // The outline's own exponent: a round disc at 2, a squared-off plank
+      // above 4. A brim is as much a shape as the crown is.
+      const ca = Math.cos(a)
+      const sa = Math.sin(a)
+      const sx = Math.sign(ca) * Math.abs(ca) ** binv
+      const sy = Math.sign(sa) * Math.abs(sa) ** binv
+      const px = sx * b.headRx * (r + wob)
+      // The droop: the near edge of the brim falls, the far edge rises.
+      const py = sy * b.headRy * (h.brimDrop + h.brimCurl * 0.25 * sa) + b.headRy * 0.04
+      // Worn up, level, or pulled down over the eyes.
+      pts.push({ x: hc.x + px * ba - py * bb, y: seatY + px * bb + py * ba })
     }
     brimRegion = pts
   }
@@ -152,9 +210,19 @@ function drawHat(s: Scene): void {
   s.hatRegion = crown
   body(crown, 0.12, !sharpPeaks)
 
+  if (h.dent > 0.06) {
+    p.stroke([
+      { x: hc.x - cw * 0.34, y: seatY - ch * (1 - h.dent * 0.85) },
+      { x: hc.x + h.lean * cw * 0.4, y: seatY - ch * (1 - h.dent) },
+      { x: hc.x + cw * 0.34, y: seatY - ch * (1 - h.dent * 0.85) },
+    ], { color: shade(col, 0.55), alpha: 0.16, width: 1.3, passes: 1, wobble: 0.8, taper: 0.7, lane: 3060 })
+  }
+
   /* ------------------------------------------------- cuff, band and seams */
 
-  if (h.cuff > 0.02) {
+  // A turn-up cuff is a knitted-hat feature; under a brim it is just a second
+  // band of cloth doing nothing.
+  if (h.cuff > 0.02 && h.brim < 0.06) {
     const cy0 = seatY - b.headRy * h.cuff
     const cuff: Pt[] = [
       { x: hc.x - cw * 1.01, y: cy0 },
@@ -707,10 +775,21 @@ const QUIRK_DRAWERS: Record<string, QuirkDrawer> = {
     const b = g.build
     const col = g.palette.accent
     const ink = adjust(g.palette.ink, 4)
-    // Band over the crown.
-    const band = arc(b.cx, b.cy - b.headRy * (0.5 + g.hair.crown * 0.4), b.headRx * 1.05, b.headRy * 0.95, Math.PI + 0.3, Math.PI * 2 - 0.3, 18)
-    p.stroke(band, { color: col, alpha: 0.24, width: 5 + k * 2, passes: 2, wobble: 0.4, lane: 3540 })
-    p.stroke(band, { color: shade(col, 1.5), alpha: 0.14, width: 1.2, passes: 1, lane: 3542 })
+    // Band over the crown — unless a hat is already there, in which case the
+    // band goes behind the head instead and only the stubs beside the cups
+    // show. Arcing it over a hat drew a handle standing off the top of it.
+    if (s.hatRegion) {
+      for (const side of [-1, 1] as const) {
+        p.stroke([
+          { x: b.cx + side * b.headRx * 1.0, y: g.face.eyeY - b.headRy * 0.06 },
+          { x: b.cx + side * b.headRx * 1.06, y: g.face.eyeY - b.headRy * 0.26 },
+        ], { color: col, alpha: 0.24, width: 5 + k * 2, passes: 2, wobble: 0.4, lane: 3540 + side })
+      }
+    } else {
+      const band = arc(b.cx, b.cy - b.headRy * (0.5 + g.hair.crown * 0.4), b.headRx * 1.05, b.headRy * 0.95, Math.PI + 0.3, Math.PI * 2 - 0.3, 18)
+      p.stroke(band, { color: col, alpha: 0.24, width: 5 + k * 2, passes: 2, wobble: 0.4, lane: 3540 })
+      p.stroke(band, { color: shade(col, 1.5), alpha: 0.14, width: 1.2, passes: 1, lane: 3542 })
+    }
     for (const side of [-1, 1] as const) {
       const cup = blob(b.cx + side * b.headRx * 1.0, g.face.eyeY + b.headRy * 0.08, 9 + k * 3, 12 + k * 3, p.noise, {
         n: 2.5, wobble: 0.08, lumps: 2, lane: 150 + side, steps: 20,
